@@ -1,402 +1,266 @@
 """
 Prediction module for child malnutrition detection.
-Handles model predictions and result processing.
+Supports 3-class classification using confidence thresholds.
+Optimized for MobileNetV2 model with 128x128 input images.
 """
 
 import os
 import numpy as np
-import json
-from typing import Dict, List, Any, Optional, Tuple
-import logging
-from datetime import datetime
 import cv2
 from PIL import Image
-import io
-import base64
-
-# Import our modules
-from .preprocessing import ImagePreprocessor
-from .model import MalnutritionCNN
+import tensorflow as tf
+from tensorflow import keras
+from typing import Dict, List, Tuple, Optional
+import logging
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class MalnutritionPredictor:
-    """Handles predictions for malnutrition detection."""
+    """Predictor for malnutrition detection with 3-class output using confidence thresholds."""
     
-    def __init__(self, model_path: str = "models/malnutrition_model.pkl"):
+    def __init__(self, model_path: str, confidence_threshold: float = 0.65):
         """
         Initialize the predictor.
         
         Args:
             model_path: Path to the trained model
+            confidence_threshold: Minimum confidence for binary classification (default 0.65)
         """
         self.model_path = model_path
+        self.confidence_threshold = confidence_threshold
         self.model = None
-        self.preprocessor = ImagePreprocessor()
-        self.class_names = ['Normal', 'Malnourished']
-        self.load_model()
-    
-    def load_model(self) -> bool:
-        """
-        Load the trained model.
+        self.class_names = ['malnourished', 'overnourished', 'normal']
+        self.binary_classes = ['malnourished', 'overnourished']
         
-        Returns:
-            True if successful, False otherwise
-        """
+        # Load model
+        self.load_model()
+        
+    def load_model(self) -> bool:
+        """Load the trained model."""
         try:
-            if not os.path.exists(self.model_path):
-                logger.warning(f"Model file not found: {self.model_path}")
-                return False
-            
-            # Create model instance
-            self.model = MalnutritionCNN()
-            
-            # Load the trained model
-            success = self.model.load_model(self.model_path)
-            if success:
-                logger.info("Model loaded successfully")
-                return True
-            else:
-                logger.error("Failed to load model")
-                return False
-                
+            self.model = keras.models.load_model(self.model_path)
+            logger.info(f"Model loaded successfully from {self.model_path}")
+            return True
         except Exception as e:
             logger.error(f"Error loading model: {str(e)}")
             return False
     
-    def predict_single_image(self, image_path: str) -> Dict[str, Any]:
+    def preprocess_image(self, image_path: str, target_size: Tuple[int, int] = (128, 128)) -> Optional[np.ndarray]:
         """
-        Predict malnutrition status for a single image.
+        Preprocess image for prediction (optimized for MobileNet 128x128).
+        
+        Args:
+            image_path: Path to the image file
+            target_size: Target size for resizing (default 128x128 for MobileNet)
+            
+        Returns:
+            Preprocessed image array or None if error
+        """
+        try:
+            # Load image using OpenCV
+            image = cv2.imread(image_path)
+            if image is None:
+                logger.error(f"Could not load image: {image_path}")
+                return None
+            
+            # Convert BGR to RGB
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            
+            # Resize to target size
+            image = cv2.resize(image, target_size)
+            
+            # Normalize to [0, 1] range
+            image = image.astype(np.float32) / 255.0
+            
+            # Add batch dimension
+            image = np.expand_dims(image, axis=0)
+            
+            return image
+            
+        except Exception as e:
+            logger.error(f"Error preprocessing image {image_path}: {str(e)}")
+            return None
+
+    def _classify_with_confidence(self, prob_malnourished: float, prob_overnourished: float) -> Tuple[str, float]:
+        """
+        Classify using confidence thresholds for 3-class output.
+        Args:
+            prob_malnourished: Probability of being malnourished
+            prob_overnourished: Probability of being overnourished
+        Returns:
+            Tuple of (predicted_class, confidence)
+        """
+        if prob_malnourished >= self.confidence_threshold:
+            return "malnourished", prob_malnourished
+        elif prob_overnourished >= self.confidence_threshold:
+            return "overnourished", prob_overnourished
+        else:
+            # Both probabilities are < 0.65 - classify as normal
+            # This represents the "uncertainty zone" (0.35-0.65) where child appears normal
+            max_prob = max(prob_malnourished, prob_overnourished)
+            normal_confidence = 1.0 - max_prob  # Higher when model is more uncertain
+            return "normal", normal_confidence
+
+    def predict_single(self, image_path: str) -> Dict:
+        """
+        Predict malnutrition class for a single image.
         
         Args:
             image_path: Path to the image file
             
         Returns:
-            Dictionary containing prediction results
+            Dictionary with prediction results
         """
-        try:
-            # Preprocess the image
-            processed_image = self.preprocessor.preprocess_single_image(image_path)
-            if processed_image is None:
-                return {
-                    'success': False,
-                    'error': 'Failed to process image'
-                }
-            
-            # Make prediction
-            predictions = self.model.predict(processed_image)
-            predicted_class = np.argmax(predictions[0])
-            confidence = float(np.max(predictions[0]))
-            
-            # Extract features for analysis
-            features = self.preprocessor.extract_features(processed_image[0])
-            
-            result = {
-                'success': True,
-                'prediction': {
-                    'class': self.class_names[predicted_class],
-                    'class_id': int(predicted_class),
-                    'confidence': confidence,
-                    'probabilities': {
-                        'normal': float(predictions[0][0]),
-                        'malnourished': float(predictions[0][1])
-                    }
-                },
-                'features': {
-                    'color_features': features[:6].tolist(),
-                    'texture_features': features[6:8].tolist(),
-                    'shape_features': features[8:].tolist()
-                },
-                'timestamp': datetime.now().isoformat(),
+        # Preprocess image
+        processed_image = self.preprocess_image(image_path)
+        if processed_image is None:
+            return {
+                'error': 'Failed to preprocess image',
                 'image_path': image_path
             }
+        
+        try:
+            # Get model prediction
+            prediction = self.model.predict(processed_image, verbose=0)[0][0]
             
-            logger.info(f"Prediction completed: {result['prediction']['class']} "
-                       f"(confidence: {confidence:.3f})")
+            # Convert to class probabilities
+            prob_overnourished = float(prediction)
+            prob_malnourished = 1.0 - prob_overnourished
             
-            return result
+            # Apply confidence-based classification
+            predicted_class, confidence = self._classify_with_confidence(
+                prob_malnourished, prob_overnourished
+            )
+            
+            # Get interpretation and recommendation
+            interpretation = self._get_interpretation(predicted_class, confidence)
+            recommendation = self._get_recommendation(predicted_class)
+            
+            return {
+                'image_path': image_path,
+                'predicted_class': predicted_class,
+                'confidence': float(confidence),
+                'probabilities': {
+                    'malnourished': float(prob_malnourished),
+                    'overnourished': float(prob_overnourished),
+                    'normal': float(1.0 - max(prob_malnourished, prob_overnourished)) if predicted_class == 'normal' else 0.0
+                },
+                'interpretation': interpretation,
+                'recommendation': recommendation,
+                'confidence_threshold': self.confidence_threshold
+            }
             
         except Exception as e:
-            logger.error(f"Error making prediction: {str(e)}")
+            logger.error(f"Error during prediction: {str(e)}")
             return {
-                'success': False,
-                'error': str(e)
+                'error': f'Prediction failed: {str(e)}',
+                'image_path': image_path
             }
-    
-    def predict_batch_images(self, image_paths: List[str]) -> Dict[str, Any]:
+
+    def predict_batch(self, image_paths: List[str]) -> List[Dict]:
         """
-        Predict malnutrition status for multiple images.
+        Predict malnutrition classes for multiple images.
         
         Args:
             image_paths: List of image file paths
             
         Returns:
-            Dictionary containing batch prediction results
+            List of prediction dictionaries
         """
-        try:
-            results = []
-            successful_predictions = 0
-            
-            for image_path in image_paths:
-                result = self.predict_single_image(image_path)
-                results.append(result)
-                
-                if result['success']:
-                    successful_predictions += 1
-            
-            # Calculate batch statistics
-            if successful_predictions > 0:
-                confidences = [r['prediction']['confidence'] 
-                             for r in results if r['success']]
-                avg_confidence = np.mean(confidences)
-                
-                class_counts = {}
-                for result in results:
-                    if result['success']:
-                        class_name = result['prediction']['class']
-                        class_counts[class_name] = class_counts.get(class_name, 0) + 1
-            else:
-                avg_confidence = 0.0
-                class_counts = {}
-            
-            batch_result = {
-                'success': True,
-                'total_images': len(image_paths),
-                'successful_predictions': successful_predictions,
-                'failed_predictions': len(image_paths) - successful_predictions,
-                'average_confidence': avg_confidence,
-                'class_distribution': class_counts,
-                'predictions': results,
-                'timestamp': datetime.now().isoformat()
-            }
-            
-            logger.info(f"Batch prediction completed: {successful_predictions}/{len(image_paths)} "
-                       f"successful predictions")
-            
-            return batch_result
-            
-        except Exception as e:
-            logger.error(f"Error in batch prediction: {str(e)}")
-            return {
-                'success': False,
-                'error': str(e)
-            }
-    
-    def predict_from_base64(self, image_base64: str) -> Dict[str, Any]:
-        """
-        Predict malnutrition status from base64 encoded image.
-        
-        Args:
-            image_base64: Base64 encoded image string
-            
-        Returns:
-            Dictionary containing prediction results
-        """
-        try:
-            # Decode base64 image
-            image_data = base64.b64decode(image_base64)
-            image = Image.open(io.BytesIO(image_data))
-            
-            # Convert to numpy array
-            image_array = np.array(image)
-            
-            # Convert RGBA to RGB if necessary
-            if image_array.shape[2] == 4:
-                image_array = cv2.cvtColor(image_array, cv2.COLOR_RGBA2RGB)
-            
-            # Preprocess image
-            processed_image = self.preprocessor.resize_image(image_array)
-            processed_image = self.preprocessor.normalize_image(processed_image)
-            processed_image = np.expand_dims(processed_image, axis=0)
-            
-            # Make prediction
-            predictions = self.model.predict(processed_image)
-            predicted_class = np.argmax(predictions[0])
-            confidence = float(np.max(predictions[0]))
-            
-            # Extract features
-            features = self.preprocessor.extract_features(processed_image[0])
-            
-            result = {
-                'success': True,
-                'prediction': {
-                    'class': self.class_names[predicted_class],
-                    'class_id': int(predicted_class),
-                    'confidence': confidence,
-                    'probabilities': {
-                        'normal': float(predictions[0][0]),
-                        'malnourished': float(predictions[0][1])
-                    }
-                },
-                'features': {
-                    'color_features': features[:6].tolist(),
-                    'texture_features': features[6:8].tolist(),
-                    'shape_features': features[8:].tolist()
-                },
-                'timestamp': datetime.now().isoformat()
-            }
-            
-            logger.info(f"Base64 prediction completed: {result['prediction']['class']} "
-                       f"(confidence: {confidence:.3f})")
-            
-            return result
-            
-        except Exception as e:
-            logger.error(f"Error making base64 prediction: {str(e)}")
-            return {
-                'success': False,
-                'error': str(e)
-            }
-    
-    def get_prediction_interpretation(self, prediction_result: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Provide interpretation of prediction results.
-        
-        Args:
-            prediction_result: Result from prediction methods
-            
-        Returns:
-            Dictionary containing interpretation
-        """
-        if not prediction_result.get('success', False):
-            return {'error': 'No valid prediction to interpret'}
-        
-        prediction = prediction_result['prediction']
-        features = prediction_result.get('features', {})
-        
-        interpretation = {
-            'risk_level': self._get_risk_level(prediction['confidence']),
-            'recommendation': self._get_recommendation(prediction['class'], prediction['confidence']),
-            'feature_analysis': self._analyze_features(features),
-            'confidence_interpretation': self._interpret_confidence(prediction['confidence'])
+        results = []
+        for image_path in image_paths:
+            result = self.predict_single(image_path)
+            results.append(result)
+        return results
+
+    def _get_interpretation(self, predicted_class: str, confidence: float) -> str:
+        """Get human-readable interpretation of the prediction."""
+        interpretations = {
+            'malnourished': f"Child shows signs of malnutrition (confidence: {confidence:.2f})",
+            'overnourished': f"Child shows signs of overnutrition (confidence: {confidence:.2f})",
+            'normal': f"Child appears to have normal nutritional status (confidence: {confidence:.2f})"
         }
+        return interpretations.get(predicted_class, "Unknown classification")
+
+    def _get_recommendation(self, predicted_class: str) -> str:
+        """Get actionable recommendation based on prediction."""
+        recommendations = {
+            'malnourished': "Immediate medical evaluation recommended. Assess for underlying causes and initiate appropriate nutritional intervention.",
+            'overnourished': "Nutritional counseling recommended. Consider dietary modifications and increased physical activity.",
+            'normal': "Continue current nutritional practices. Regular monitoring recommended."
+        }
+        return recommendations.get(predicted_class, "Consult healthcare professional for guidance.")
+
+    def get_model_info(self) -> Dict:
+        """Get information about the loaded model."""
+        if self.model is None:
+            return {'error': 'No model loaded'}
         
-        return interpretation
-    
-    def _get_risk_level(self, confidence: float) -> str:
-        """Get risk level based on confidence."""
-        if confidence >= 0.9:
-            return 'Very High'
-        elif confidence >= 0.8:
-            return 'High'
-        elif confidence >= 0.7:
-            return 'Medium'
-        elif confidence >= 0.6:
-            return 'Low'
-        else:
-            return 'Very Low'
-    
-    def _get_recommendation(self, predicted_class: str, confidence: float) -> str:
-        """Get recommendation based on prediction."""
-        if predicted_class == 'Malnourished':
-            if confidence >= 0.8:
-                return 'Immediate medical attention recommended'
-            elif confidence >= 0.6:
-                return 'Medical consultation advised'
-            else:
-                return 'Further assessment recommended'
-        else:
-            if confidence >= 0.8:
-                return 'Continue regular monitoring'
-            else:
-                return 'Regular health check-ups recommended'
-    
-    def _analyze_features(self, features: Dict[str, List[float]]) -> Dict[str, str]:
-        """Analyze extracted features."""
-        analysis = {}
-        
-        if 'color_features' in features:
-            color_features = features['color_features']
-            if len(color_features) >= 3:
-                # Analyze color distribution
-                red_mean, green_mean, blue_mean = color_features[:3]
-                if red_mean > green_mean and red_mean > blue_mean:
-                    analysis['color_analysis'] = 'Reddish tones detected (may indicate health issues)'
-                elif green_mean > red_mean and green_mean > blue_mean:
-                    analysis['color_analysis'] = 'Greenish tones detected (normal skin tone)'
-                else:
-                    analysis['color_analysis'] = 'Balanced color distribution'
-        
-        if 'texture_features' in features:
-            texture_features = features['texture_features']
-            if len(texture_features) >= 2:
-                edge_density = texture_features[0]
-                if edge_density > 50:
-                    analysis['texture_analysis'] = 'High texture complexity detected'
-                else:
-                    analysis['texture_analysis'] = 'Low texture complexity detected'
-        
-        return analysis
-    
-    def _interpret_confidence(self, confidence: float) -> str:
-        """Interpret confidence level."""
-        if confidence >= 0.9:
-            return 'Very confident prediction'
-        elif confidence >= 0.8:
-            return 'Confident prediction'
-        elif confidence >= 0.7:
-            return 'Moderately confident prediction'
-        elif confidence >= 0.6:
-            return 'Low confidence prediction'
-        else:
-            return 'Very low confidence prediction'
-    
-    def save_prediction_result(self, result: Dict[str, Any], output_path: str) -> bool:
+        try:
+            return {
+                'model_path': self.model_path,
+                'input_shape': self.model.input_shape,
+                'output_shape': self.model.output_shape,
+                'total_parameters': self.model.count_params(),
+                'confidence_threshold': self.confidence_threshold,
+                'supported_classes': self.class_names
+            }
+        except Exception as e:
+            return {'error': f'Failed to get model info: {str(e)}'}
+
+    def set_confidence_threshold(self, threshold: float) -> bool:
         """
-        Save prediction result to file.
+        Update the confidence threshold for classification.
         
         Args:
-            result: Prediction result dictionary
-            output_path: Path to save the result
+            threshold: New confidence threshold (0.0 to 1.0)
             
         Returns:
             True if successful, False otherwise
         """
-        try:
-            # Create directory if it doesn't exist
-            os.makedirs(os.path.dirname(output_path), exist_ok=True)
-            
-            # Save as JSON
-            with open(output_path, 'w') as f:
-                json.dump(result, f, indent=2)
-            
-            logger.info(f"Prediction result saved to {output_path}")
+        if 0.0 <= threshold <= 1.0:
+            self.confidence_threshold = threshold
+            logger.info(f"Confidence threshold updated to {threshold}")
             return True
-            
-        except Exception as e:
-            logger.error(f"Error saving prediction result: {str(e)}")
+        else:
+            logger.error(f"Invalid threshold {threshold}. Must be between 0.0 and 1.0")
             return False
 
 
-def create_predictor(model_path: str = "models/malnutrition_model.pkl") -> MalnutritionPredictor:
+def create_predictor(model_path: str, confidence_threshold: float = 0.65) -> MalnutritionPredictor:
     """
-    Factory function to create a malnutrition predictor.
+    Factory function to create a MalnutritionPredictor instance.
     
     Args:
-        model_path: Path to the trained model
+        model_path: Path to the trained model file
+        confidence_threshold: Confidence threshold for classification
         
     Returns:
-        Configured MalnutritionPredictor instance
+        MalnutritionPredictor instance
     """
-    return MalnutritionPredictor(model_path)
+    return MalnutritionPredictor(model_path, confidence_threshold)
 
 
-# Example usage
 if __name__ == "__main__":
-    # Create predictor
-    predictor = create_predictor()
+    # Example usage
+    model_path = "../models/malnutrition_model.h5"
     
-    # Example prediction
-    image_path = "data/test/sample_image.jpg"
-    if os.path.exists(image_path):
-        result = predictor.predict_single_image(image_path)
-        if result['success']:
-            print(f"Prediction: {result['prediction']['class']}")
-            print(f"Confidence: {result['prediction']['confidence']:.3f}")
-            
-            # Get interpretation
-            interpretation = predictor.get_prediction_interpretation(result)
-            print(f"Risk Level: {interpretation['risk_level']}")
-            print(f"Recommendation: {interpretation['recommendation']}") 
+    if os.path.exists(model_path):
+        predictor = create_predictor(model_path, confidence_threshold=0.65)
+        
+        # Example prediction
+        test_image = "../data/test/malnourished/malnourished-338_jpg.rf.e4084a36394a8785ffb48a82c7873a81.jpg"
+        if os.path.exists(test_image):
+            result = predictor.predict_single(test_image)
+            print("🔍 Prediction Result:")
+            print(f"   Image: {result.get('image_path', 'N/A')}")
+            print(f"   Class: {result.get('predicted_class', 'N/A')}")
+            print(f"   Confidence: {result.get('confidence', 0):.3f}")
+            print(f"   Interpretation: {result.get('interpretation', 'N/A')}")
+        else:
+            print(f"Test image not found: {test_image}")
+    else:
+        print(f"Model not found: {model_path}")
+        print("Please run the notebook to train the model first.") 

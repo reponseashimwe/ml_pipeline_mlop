@@ -17,8 +17,6 @@ from pydantic import BaseModel
 import uvicorn
 
 # Import our modules
-from .preprocessing import ImagePreprocessor
-from .model import MalnutritionCNN
 from .prediction import MalnutritionPredictor
 
 # Configure logging
@@ -28,7 +26,7 @@ logger = logging.getLogger(__name__)
 # Initialize FastAPI app
 app = FastAPI(
     title="Child Malnutrition Detection API",
-    description="ML Pipeline for detecting child malnutrition from images",
+    description="ML Pipeline for detecting child malnutrition from images using MobileNetV2",
     version="1.0.0"
 )
 
@@ -41,10 +39,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize components
-preprocessor = ImagePreprocessor()
-predictor = MalnutritionPredictor()
-model = MalnutritionCNN()
+# Initialize predictor
+predictor = None  # Will be initialized when model is loaded
 
 # Pydantic models for request/response
 class PredictionResponse(BaseModel):
@@ -84,33 +80,35 @@ model_status = {
 @app.on_event("startup")
 async def startup_event():
     """Initialize the application on startup."""
+    global predictor
     logger.info("Starting Child Malnutrition Detection API...")
     
     # Try to load existing model
-    model_path = "models/malnutrition_model.pkl"
+    model_path = "../models/malnutrition_model.h5"
     if os.path.exists(model_path):
-        success = predictor.load_model()
-        if success:
+        try:
+            from prediction import create_predictor
+            predictor = create_predictor(model_path, confidence_threshold=0.65)
             model_status["loaded"] = True
             model_status["last_updated"] = datetime.now().isoformat()
             logger.info("Model loaded successfully on startup")
-        else:
-            logger.warning("Failed to load existing model on startup")
+        except Exception as e:
+            logger.error(f"Failed to load model: {e}")
+            predictor = None
     else:
-        logger.info("No existing model found. Model will be created during training.")
+        logger.info("No existing model found. Please train the model first.")
 
 @app.get("/")
 async def root():
     """Root endpoint with API information."""
     return {
         "message": "Child Malnutrition Detection API",
-        "version": "1.0.0",
+        "version": "1.0.0", 
         "status": "running",
+        "model_loaded": predictor is not None,
         "endpoints": {
             "predict_single": "/predict/image",
-            "predict_batch": "/predict/bulk",
-            "upload_data": "/upload/data",
-            "retrain": "/retrain",
+            "predict_batch": "/predict/bulk", 
             "status": "/status",
             "docs": "/docs"
         }
@@ -127,6 +125,9 @@ async def predict_single_image(file: UploadFile = File(...)):
     Returns:
         Prediction result with class and confidence
     """
+    if predictor is None:
+        raise HTTPException(status_code=503, detail="Model not loaded. Please ensure model is trained and available.")
+    
     try:
         # Validate file type
         if not file.content_type.startswith('image/'):
@@ -137,19 +138,25 @@ async def predict_single_image(file: UploadFile = File(...)):
             shutil.copyfileobj(file.file, temp_file)
             temp_path = temp_file.name
         
-        # Make prediction
-        result = predictor.predict_single_image(temp_path)
+        # Make prediction using our updated prediction module
+        result = predictor.predict_single(temp_path)
         
         # Clean up temporary file
         os.unlink(temp_path)
         
-        if not result['success']:
+        if 'error' in result:
             raise HTTPException(status_code=500, detail=result['error'])
         
         return PredictionResponse(
             success=True,
-            prediction=result['prediction'],
-            timestamp=result['timestamp']
+            prediction={
+                'class': result['predicted_class'],
+                'confidence': result['confidence'],
+                'probabilities': result['probabilities'],
+                'interpretation': result['interpretation'],
+                'recommendation': result['recommendation']
+            },
+            timestamp=datetime.now().isoformat()
         )
         
     except Exception as e:
