@@ -1,0 +1,80 @@
+version: '3.8'
+
+services:
+    # FastAPI Backend
+    api:
+        build:
+            context: .
+            dockerfile: docker/Dockerfile
+        ports:
+            - '8000:8000'
+        volumes:
+            - ./data:/app/data
+            - ./models:/app/models
+        environment:
+            - PYTHONPATH=/app
+            - MODEL_PATH=/app/models/malnutrition_model.pkl
+        restart: unless-stopped
+        networks:
+            - ml-network
+
+    # Next.js Frontend
+    frontend:
+        build:
+            context: ./frontend
+            dockerfile: Dockerfile
+        ports:
+            - '3000:3000'
+        environment:
+            - NEXT_PUBLIC_API_URL=http://localhost:8000
+        depends_on:
+            - api
+        restart: unless-stopped
+        networks:
+            - ml-network
+
+    # PostgreSQL Database (optional)
+    postgres:
+        image: postgres:13
+        environment:
+            POSTGRES_DB: malnutrition_db
+            POSTGRES_USER: ml_user
+            POSTGRES_PASSWORD: ml_password
+        ports:
+            - '5432:5432'
+        volumes:
+            - postgres_data:/var/lib/postgresql/data
+        restart: unless-stopped
+        networks:
+            - ml-network
+
+    # Redis for caching (optional)
+    redis:
+        image: redis:6-alpine
+        ports:
+            - '6379:6379'
+        restart: unless-stopped
+        networks:
+            - ml-network
+
+    # Locust for load testing
+    locust:
+        build:
+            context: .
+            dockerfile: docker/Dockerfile.locust
+        ports:
+            - '8089:8089'
+        environment:
+            - LOCUST_HOST=http://api:8000
+        depends_on:
+            - api
+        networks:
+            - ml-network
+        command: locust -f /app/tests/locustfile.py --host=http://api:8000 --web-host=0.0.0.0
+
+volumes:
+    postgres_data:
+
+networks:
+    ml-network:
+        driver: bridge

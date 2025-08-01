@@ -1,0 +1,120 @@
+# Python Backend
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+eggs/
+.eggs/
+sdist/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Python testing
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
+
+# Python IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Python logs
+*.log
+pip-log.txt
+pip-delete-this-directory.txt
+
+# TensorBoard
+runs/
+logs/
+
+# Configuration files with secrets
+config.ini
+secrets.json
+.env.local
+.env.production
+
+# Next.js Frontend
+node_modules/
+.next/
+out/
+build/
+
+# Next.js logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# Next.js cache
+.cache/
+.parcel-cache
+
+# Next.js environment
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# TypeScript
+*.tsbuildinfo
+
+# Optional eslint cache
+.eslintcache
+
+# Optional REPL history
+.node_repl_history
+
+# Output of 'npm pack'
+*.tgz
+
+# Yarn Integrity file
+.yarn-integrity
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Archive files
+*.zip
+*.tar.gz
+*.rar
+
+# Docker
+.dockerignore
+
+# Backup files
+*.bak
+*.backup
+*.old 

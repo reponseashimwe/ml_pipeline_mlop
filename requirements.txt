@@ -1,0 +1,37 @@
+# Core ML and Data Processing
+numpy
+pandas
+scikit-learn
+tensorflow
+opencv-python
+Pillow
+
+# API Framework
+fastapi
+uvicorn
+python-multipart
+
+# Data Visualization
+matplotlib
+seaborn
+
+# Utilities
+python-dotenv
+pydantic
+requests
+
+# Development and Testing
+pytest
+pytest-asyncio
+locust
+
+# Database (optional for production)
+psycopg2-binary
+sqlalchemy
+
+# Image Processing
+imageio
+scikit-image
+
+# Logging and Monitoring
+structlog

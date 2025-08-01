@@ -1,0 +1,34 @@
+{
+	"name": "malnutrition-detection-frontend",
+	"version": "1.0.0",
+	"description": "Frontend for Child Malnutrition Detection ML Pipeline",
+	"private": true,
+	"scripts": {
+		"dev": "next dev",
+		"build": "next build",
+		"start": "next start",
+		"lint": "next lint"
+	},
+	"dependencies": {
+		"next": "^14.0.0",
+		"react": "^18.2.0",
+		"react-dom": "^18.2.0",
+		"axios": "^1.6.0",
+		"react-dropzone": "^14.2.3",
+		"react-hook-form": "^7.48.0",
+		"recharts": "^2.8.0",
+		"tailwindcss": "^3.3.0",
+		"autoprefixer": "^10.4.16",
+		"postcss": "^8.4.31",
+		"react-hot-toast": "^2.4.1",
+		"lucide-react": "^0.292.0"
+	},
+	"devDependencies": {
+		"@types/node": "^20.3.1",
+		"@types/react": "^18.2.15",
+		"@types/react-dom": "^18.2.7",
+		"eslint": "^8.44.0",
+		"eslint-config-next": "^13.4.4",
+		"typescript": "^5.1.3"
+	}
+}
