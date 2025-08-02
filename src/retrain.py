@@ -15,6 +15,9 @@ from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCh
 import logging
 from datetime import datetime
 from typing import Dict, Tuple
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.metrics import confusion_matrix
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -23,6 +26,7 @@ logger = logging.getLogger(__name__)
 def create_optimized_model(input_shape: Tuple[int, int, int] = (128, 128, 3)) -> keras.Model:
     """
     Create MobileNetV2-based model optimized for small datasets.
+    Enhanced for better performance with fine-tuning.
     
     Args:
         input_shape: Input image shape
@@ -36,14 +40,22 @@ def create_optimized_model(input_shape: Tuple[int, int, int] = (128, 128, 3)) ->
         weights='imagenet',
         alpha=0.75  # Lighter version
     )
-    base_model.trainable = False
+    
+    # Fine-tune the last few layers of base model for better performance
+    base_model.trainable = True
+    for layer in base_model.layers[:-20]:  # Freeze all but last 20 layers
+        layer.trainable = False
     
     model = models.Sequential([
         base_model,
         layers.GlobalAveragePooling2D(),
+        layers.BatchNormalization(),
         layers.Dropout(0.3),
-        layers.Dense(32, activation='relu', kernel_regularizer=regularizers.l2(0.01)),
-        layers.Dropout(0.5),
+        layers.Dense(64, activation='relu', kernel_regularizer=regularizers.l2(0.001)),
+        layers.BatchNormalization(),
+        layers.Dropout(0.4),
+        layers.Dense(32, activation='relu', kernel_regularizer=regularizers.l2(0.001)),
+        layers.Dropout(0.3),
         layers.Dense(1, activation='sigmoid')
     ])
     
@@ -124,7 +136,8 @@ def create_data_generators(train_dir: str, batch_size: int = 8) -> Tuple:
 
 def retrain_model(train_dir: str = "../data/train", 
                  model_path: str = "../models/malnutrition_model.h5",
-                 epochs: int = 20) -> Dict[str, any]:
+                 epochs: int = 30,  # Increased for better performance
+                 progress_callback=None) -> Dict[str, any]:
     """
     Retrain the malnutrition detection model with new data.
     
@@ -132,6 +145,7 @@ def retrain_model(train_dir: str = "../data/train",
         train_dir: Directory containing training data
         model_path: Path to save the retrained model
         epochs: Number of training epochs
+        progress_callback: Optional callback function for progress updates
         
     Returns:
         Dictionary with retraining results
@@ -176,28 +190,47 @@ def retrain_model(train_dir: str = "../data/train",
         # 4. Setup training callbacks
         callbacks = [
             EarlyStopping(
-                monitor='val_loss',
-                patience=10,
+                monitor='val_accuracy',  # Monitor accuracy instead of loss
+                patience=12,
                 restore_best_weights=True,
-                verbose=1
+                verbose=1,
+                mode='max'
             ),
             ReduceLROnPlateau(
                 monitor='val_loss',
-                factor=0.3,
-                patience=5,
-                min_lr=1e-7,
-                verbose=1
+                factor=0.2,  # More aggressive reduction
+                patience=6,
+                min_lr=1e-8,
+                verbose=1,
+                cooldown=2
             ),
             ModelCheckpoint(
                 model_path.replace('.h5', '_retrained_backup.h5'),
-                monitor='val_loss',
+                monitor='val_accuracy',  # Save best accuracy model
                 save_best_only=True,
-                verbose=1
+                verbose=1,
+                mode='max'
             )
         ]
         
-        # 5. Train the model
+        # 5. Train the model with progress tracking
         logger.info(f"🔄 Training model for {epochs} epochs...")
+        
+        # Custom callback for progress tracking
+        class ProgressCallback(tf.keras.callbacks.Callback):
+            def on_epoch_end(self, epoch, logs=None):
+                if progress_callback:
+                    metrics = {
+                        "accuracy": logs.get("accuracy", 0.0),
+                        "loss": logs.get("loss", 1.0),
+                        "val_accuracy": logs.get("val_accuracy", 0.0),
+                        "val_loss": logs.get("val_loss", 1.0),
+                    }
+                    progress_callback(epoch + 1, metrics)
+        
+        # Add progress callback to callbacks list
+        if progress_callback:
+            callbacks.append(ProgressCallback())
         
         history = model.fit(
             train_generator,
@@ -214,11 +247,127 @@ def retrain_model(train_dir: str = "../data/train",
         logger.info(f"📊 Final training accuracy: {final_train_acc:.4f}")
         logger.info(f"📊 Final validation accuracy: {final_val_acc:.4f}")
         
-        # 7. Save the retrained model
+        # 7. Generate and save confusion matrix
+        try:
+            logger.info("📊 Generating confusion matrix...")
+            val_generator.reset()
+            val_predictions = model.predict(val_generator, verbose=0)
+            val_pred_classes = (val_predictions > 0.5).astype(int).flatten()
+            val_true_classes = val_generator.classes
+            
+            cm = confusion_matrix(val_true_classes, val_pred_classes)
+            
+            plt.figure(figsize=(8, 6))
+            sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
+                       xticklabels=['Malnourished', 'Overnourished'],
+                       yticklabels=['Malnourished', 'Overnourished'])
+            plt.title('Confusion Matrix - Validation Set')
+            plt.xlabel('Predicted')
+            plt.ylabel('Actual')
+            plt.tight_layout()
+            
+            confusion_matrix_path = model_path.replace('.h5', '_confusion_matrix.png')
+            plt.savefig(confusion_matrix_path, dpi=300, bbox_inches='tight')
+            plt.close()
+            logger.info(f"💾 Confusion matrix saved to: {confusion_matrix_path}")
+            
+        except Exception as e:
+            logger.warning(f"Could not generate confusion matrix: {e}")
+        
+        # 8. Generate and save training plots
+        try:
+            logger.info("📈 Generating training plots...")
+            fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+            
+            # Training history
+            axes[0].plot(history.history['accuracy'], label='Training Accuracy', color='blue')
+            axes[0].plot(history.history['val_accuracy'], label='Validation Accuracy', color='red')
+            axes[0].set_title('Model Accuracy')
+            axes[0].set_xlabel('Epoch')
+            axes[0].set_ylabel('Accuracy')
+            axes[0].legend()
+            axes[0].grid(True, alpha=0.3)
+            
+            axes[1].plot(history.history['loss'], label='Training Loss', color='blue')
+            axes[1].plot(history.history['val_loss'], label='Validation Loss', color='red')
+            axes[1].set_title('Model Loss')
+            axes[1].set_xlabel('Epoch')
+            axes[1].set_ylabel('Loss')
+            axes[1].legend()
+            axes[1].grid(True, alpha=0.3)
+            
+            plt.tight_layout()
+            
+            training_plots_path = model_path.replace('.h5', '_training_plots.png')
+            plt.savefig(training_plots_path, dpi=300, bbox_inches='tight')
+            plt.close()
+            logger.info(f"💾 Training plots saved to: {training_plots_path}")
+            
+        except Exception as e:
+            logger.warning(f"Could not generate training plots: {e}")
+        
+        # 9. Generate and save correlation matrix (feature importance visualization)
+        try:
+            logger.info("🔗 Generating correlation matrix...")
+            # Extract features from the last layer before classification
+            feature_extractor = keras.Model(inputs=model.input, outputs=model.layers[-2].output)
+            
+            # Get features for a sample of validation data
+            val_generator.reset()
+            sample_features = []
+            sample_labels = []
+            
+            for i in range(min(50, len(val_generator))):
+                batch_x, batch_y = val_generator.next()
+                features = feature_extractor.predict(batch_x, verbose=0)
+                sample_features.extend(features)
+                sample_labels.extend(batch_y)
+            
+            if len(sample_features) > 10:
+                sample_features = np.array(sample_features)
+                
+                # Calculate correlation matrix
+                corr_matrix = np.corrcoef(sample_features.T)
+                
+                plt.figure(figsize=(10, 8))
+                sns.heatmap(corr_matrix, cmap='coolwarm', center=0, 
+                           square=True, cbar_kws={"shrink": .8})
+                plt.title('Feature Correlation Matrix')
+                plt.tight_layout()
+                
+                correlation_matrix_path = model_path.replace('.h5', '_correlation_matrix.png')
+                plt.savefig(correlation_matrix_path, dpi=300, bbox_inches='tight')
+                plt.close()
+                logger.info(f"💾 Correlation matrix saved to: {correlation_matrix_path}")
+            
+        except Exception as e:
+            logger.warning(f"Could not generate correlation matrix: {e}")
+        
+        # 10. Save the retrained model
         model.save(model_path)
         logger.info(f"💾 Model saved to: {model_path}")
         
-        # 8. Return results
+        # 11. Save training history
+        training_history = []
+        for i in range(len(history.history['accuracy'])):
+            training_history.append({
+                "epoch": i + 1,
+                "accuracy": float(history.history['accuracy'][i]),
+                "loss": float(history.history['loss'][i]),
+                "val_accuracy": float(history.history['val_accuracy'][i]),
+                "val_loss": float(history.history['val_loss'][i])
+            })
+        
+        history_path = model_path.replace('.h5', '_history.json')
+        try:
+            import json
+            with open(history_path, 'w') as f:
+                json.dump(training_history, f, indent=2)
+            logger.info(f"💾 Training history saved to: {history_path}")
+        except Exception as e:
+            logger.warning(f"Could not save training history: {e}")
+        
+        # 12. Return results
         results = {
             "success": True,
             "message": "Model retrained successfully",

@@ -70,6 +70,17 @@ export interface RetrainResponse {
 	job_id?: string;
 }
 
+export interface TrainingProgress {
+	epoch: number;
+	total_epochs: number;
+	accuracy: number;
+	loss: number;
+	val_accuracy: number;
+	val_loss: number;
+	status: 'training' | 'completed' | 'failed';
+	error?: string;
+}
+
 export interface VisualizationData {
 	model_performance: Array<{
 		metric: string;
@@ -148,6 +159,17 @@ export const api = {
 		return response.data;
 	},
 
+	// Upload labeled training data
+	uploadLabeledTrainingData: async (formData: FormData): Promise<{ success: boolean; message: string }> => {
+		const response = await axiosClient.post('/upload/labeled-data', formData, {
+			headers: {
+				'Content-Type': 'multipart/form-data',
+			},
+		});
+
+		return response.data;
+	},
+
 	// Get model status
 	getModelStatus: async (): Promise<ModelStatus> => {
 		const response = await axiosClient.get('/status');
@@ -163,6 +185,12 @@ export const api = {
 	// Retrain model
 	retrainModel: async (): Promise<RetrainResponse> => {
 		const response = await axiosClient.post('/retrain');
+		return response.data;
+	},
+
+	// Get training progress
+	getTrainingProgress: async (jobId: string): Promise<TrainingProgress> => {
+		const response = await axiosClient.get(`/training/progress/${jobId}`);
 		return response.data;
 	},
 
