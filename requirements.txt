@@ -34,4 +34,4 @@ imageio
 scikit-image
 
 # Logging and Monitoring
-structlog
+structlogpsutil

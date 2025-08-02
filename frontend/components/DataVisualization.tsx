@@ -16,125 +16,202 @@ import {
 	LineChart,
 	Line,
 } from 'recharts';
+import api, { VisualizationData } from '../lib/api';
 
-interface VisualizationData {
-	modelPerformance: Array<{
+interface VisualizationDataProps {
+	model_performance: Array<{
 		metric: string;
 		value: number;
 		color: string;
 	}>;
-	classDistribution: Array<{
+	class_distribution: Array<{
 		name: string;
 		value: number;
 		color: string;
 	}>;
-	trainingHistory: Array<{
+	training_history: Array<{
 		epoch: number;
 		accuracy: number;
 		loss: number;
 		val_accuracy: number;
 		val_loss: number;
 	}>;
-	featureImportance: Array<{
+	feature_importance: Array<{
 		feature: string;
 		importance: number;
 		color: string;
 	}>;
+	total_training_images: number;
+	last_updated: string;
+	// Backend text content
+	interpretations: {
+		performance: string;
+		distribution: string;
+		training: string;
+		features: string;
+	};
+	key_insights: {
+		model_performance: string;
+		data_balance: string;
+		feature_importance: string;
+		training_stability: string;
+	};
+	chart_titles: {
+		performance: string;
+		distribution: string;
+		training: string;
+		features: string;
+	};
 }
 
 const DataVisualization: React.FC = () => {
 	const [activeTab, setActiveTab] = useState('performance');
-	const [data, setData] = useState<VisualizationData | null>(null);
+	const [data, setData] = useState<VisualizationDataProps | null>(null);
 	const [isLoading, setIsLoading] = useState(true);
+	const [error, setError] = useState<string | null>(null);
+	const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
 	useEffect(() => {
-		// Simulate loading data
-		setTimeout(() => {
-			setData({
-				modelPerformance: [
-					{ metric: 'Accuracy', value: 0.89, color: '#3B82F6' },
-					{ metric: 'Precision', value: 0.87, color: '#10B981' },
-					{ metric: 'Recall', value: 0.91, color: '#8B5CF6' },
-					{ metric: 'F1-Score', value: 0.89, color: '#F59E0B' },
-				],
-				classDistribution: [
-					{ name: 'Normal', value: 65, color: '#10B981' },
-					{ name: 'Malnourished', value: 35, color: '#EF4444' },
-				],
-				trainingHistory: [
-					{ epoch: 1, accuracy: 0.65, loss: 0.8, val_accuracy: 0.62, val_loss: 0.85 },
-					{ epoch: 5, accuracy: 0.72, loss: 0.6, val_accuracy: 0.7, val_loss: 0.65 },
-					{ epoch: 10, accuracy: 0.78, loss: 0.5, val_accuracy: 0.76, val_loss: 0.55 },
-					{ epoch: 15, accuracy: 0.82, loss: 0.4, val_accuracy: 0.8, val_loss: 0.45 },
-					{ epoch: 20, accuracy: 0.85, loss: 0.35, val_accuracy: 0.83, val_loss: 0.4 },
-					{ epoch: 25, accuracy: 0.87, loss: 0.3, val_accuracy: 0.85, val_loss: 0.35 },
-					{ epoch: 30, accuracy: 0.89, loss: 0.25, val_accuracy: 0.87, val_loss: 0.3 },
-				],
-				featureImportance: [
-					{ feature: 'Color Features', importance: 0.35, color: '#3B82F6' },
-					{ feature: 'Texture Features', importance: 0.28, color: '#10B981' },
-					{ feature: 'Shape Features', importance: 0.22, color: '#8B5CF6' },
-					{ feature: 'Edge Features', importance: 0.15, color: '#F59E0B' },
-				],
-			});
-			setIsLoading(false);
-		}, 1000);
+		fetchVisualizationData();
 	}, []);
+
+	const fetchVisualizationData = async () => {
+		try {
+			setIsLoading(true);
+			setError(null);
+
+			// Fetch real visualization data from backend
+			const visualizationData = await api.getVisualizationData();
+			setData(visualizationData);
+			setLastUpdated(new Date());
+		} catch (err) {
+			console.error('Error fetching visualization data:', err);
+			setError('Failed to load visualization data from backend');
+		} finally {
+			setIsLoading(false);
+		}
+	};
 
 	const tabs = [
 		{ id: 'performance', label: 'Model Performance', icon: '📊' },
 		{ id: 'distribution', label: 'Class Distribution', icon: '🥧' },
 		{ id: 'training', label: 'Training History', icon: '📈' },
 		{ id: 'features', label: 'Feature Importance', icon: '🔍' },
+		{ id: 'confusion', label: 'Confusion Matrix', icon: '🎯' },
+		{ id: 'correlation', label: 'Correlation Matrix', icon: '🔗' },
 	];
 
 	if (isLoading) {
 		return (
 			<div className='flex items-center justify-center py-12'>
 				<div className='animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600'></div>
-				<span className='ml-3 text-gray-600'>Loading visualizations...</span>
+				<span className='ml-3 text-gray-600'>Loading real-time data...</span>
+			</div>
+		);
+	}
+
+	if (error) {
+		return (
+			<div className='bg-red-50 border border-red-200 rounded-lg p-6'>
+				<div className='flex items-center'>
+					<div className='text-red-500 mr-3'>⚠️</div>
+					<div>
+						<h3 className='text-red-800 font-medium'>Data Loading Error</h3>
+						<p className='text-red-700 text-sm mt-1'>{error}</p>
+						<button
+							onClick={fetchVisualizationData}
+							className='mt-2 text-sm text-red-600 hover:text-red-800 underline'
+						>
+							Retry
+						</button>
+					</div>
+				</div>
 			</div>
 		);
 	}
 
 	if (!data) {
 		return (
-			<div className='bg-yellow-50 border border-yellow-200 rounded-lg p-6'>
-				<p className='text-yellow-700'>No visualization data available</p>
+			<div className='bg-gray-50 border border-gray-200 rounded-lg p-6'>
+				<div className='text-center'>
+					<p className='text-gray-500'>No data available</p>
+					<button
+						onClick={fetchVisualizationData}
+						className='mt-2 text-sm text-blue-600 hover:text-blue-800 underline'
+					>
+						Load Data
+					</button>
+				</div>
 			</div>
 		);
 	}
 
 	return (
-		<div className='space-y-6'>
-			<h3 className='text-xl font-semibold text-gray-900'>Data Visualizations & Insights</h3>
+		<div className='bg-white border rounded-lg p-6'>
+			{/* Header with refresh button */}
+			<div className='flex justify-between items-center mb-6'>
+				<h3 className='text-lg font-semibold text-gray-900'>Data Visualizations</h3>
+				<div className='flex items-center space-x-3'>
+					{lastUpdated && (
+						<p className='text-xs text-gray-500'>Last updated: {lastUpdated.toLocaleTimeString()}</p>
+					)}
+					<button
+						onClick={fetchVisualizationData}
+						disabled={isLoading}
+						className='text-sm text-blue-600 hover:text-blue-800 disabled:text-gray-400'
+					>
+						🔄 Refresh
+					</button>
+				</div>
+			</div>
 
 			{/* Navigation Tabs */}
-			<div className='flex space-x-1 bg-gray-100 p-1 rounded-lg'>
-				{tabs.map((tab) => (
-					<button
-						key={tab.id}
-						onClick={() => setActiveTab(tab.id)}
-						className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors duration-200 ${
-							activeTab === tab.id
-								? 'bg-white text-blue-600 shadow-sm'
-								: 'text-gray-600 hover:text-gray-900'
-						}`}
-					>
-						<span className='mr-2'>{tab.icon}</span>
-						{tab.label}
-					</button>
-				))}
+			<div className='mb-6'>
+				<div className='border-b border-gray-200'>
+					<nav className='-mb-px flex space-x-8'>
+						{tabs.map((tab) => (
+							<button
+								key={tab.id}
+								onClick={() => setActiveTab(tab.id)}
+								className={`py-2 px-1 border-b-2 font-medium text-sm transition-colors duration-200 ${
+									activeTab === tab.id
+										? 'border-blue-500 text-blue-600'
+										: 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+								}`}
+							>
+								<span className='mr-2'>{tab.icon}</span>
+								{tab.label}
+							</button>
+						))}
+					</nav>
+				</div>
+			</div>
+
+			{/* Data Source Info */}
+			<div className='mb-4 p-3 bg-blue-50 rounded-lg'>
+				<div className='flex items-center justify-between text-sm'>
+					<div className='flex items-center space-x-2'>
+						<span className='text-blue-600'>📊</span>
+						<span className='text-blue-800 font-medium'>Real-time Data</span>
+					</div>
+					<div className='text-blue-600'>Total Training Images: {data.total_training_images}</div>
+				</div>
+				<div className='mt-2 text-xs text-blue-600'>
+					<p>• Model Performance: Real metrics from trained model</p>
+					<p>• Class Distribution: Actual file counts from training data</p>
+					<p>• Training History: Based on MobileNetV2 training patterns</p>
+					<p>• Feature Importance: Analysis of malnutrition detection features</p>
+				</div>
 			</div>
 
 			{/* Visualization Content */}
 			<div className='bg-white border rounded-lg p-6'>
 				{activeTab === 'performance' && (
 					<div>
-						<h4 className='text-lg font-medium text-gray-900 mb-4'>Model Performance Metrics</h4>
+						<h4 className='text-lg font-medium text-gray-900 mb-4'>{data.chart_titles.performance}</h4>
 						<div className='h-80'>
 							<ResponsiveContainer width='100%' height='100%'>
-								<BarChart data={data.modelPerformance}>
+								<BarChart data={data.model_performance}>
 									<CartesianGrid strokeDasharray='3 3' />
 									<XAxis dataKey='metric' />
 									<YAxis domain={[0, 1]} />
@@ -145,8 +222,7 @@ const DataVisualization: React.FC = () => {
 						</div>
 						<div className='mt-4 text-sm text-gray-600'>
 							<p>
-								<strong>Interpretation:</strong> The model shows strong performance across all metrics,
-								with particularly high recall indicating good detection of malnourished cases.
+								<strong>Interpretation:</strong> {data.interpretations.performance}
 							</p>
 						</div>
 					</div>
@@ -154,12 +230,12 @@ const DataVisualization: React.FC = () => {
 
 				{activeTab === 'distribution' && (
 					<div>
-						<h4 className='text-lg font-medium text-gray-900 mb-4'>Class Distribution</h4>
+						<h4 className='text-lg font-medium text-gray-900 mb-4'>{data.chart_titles.distribution}</h4>
 						<div className='h-80'>
 							<ResponsiveContainer width='100%' height='100%'>
 								<PieChart>
 									<Pie
-										data={data.classDistribution}
+										data={data.class_distribution}
 										cx='50%'
 										cy='50%'
 										labelLine={false}
@@ -168,7 +244,7 @@ const DataVisualization: React.FC = () => {
 										fill='#8884d8'
 										dataKey='value'
 									>
-										{data.classDistribution.map((entry, index) => (
+										{data.class_distribution.map((entry, index) => (
 											<Cell key={`cell-${index}`} fill={entry.color} />
 										))}
 									</Pie>
@@ -178,8 +254,7 @@ const DataVisualization: React.FC = () => {
 						</div>
 						<div className='mt-4 text-sm text-gray-600'>
 							<p>
-								<strong>Interpretation:</strong> The dataset shows a 65:35 split between normal and
-								malnourished cases, indicating a slight class imbalance that the model handles well.
+								<strong>Interpretation:</strong> {data.interpretations.distribution}
 							</p>
 						</div>
 					</div>
@@ -187,36 +262,59 @@ const DataVisualization: React.FC = () => {
 
 				{activeTab === 'training' && (
 					<div>
-						<h4 className='text-lg font-medium text-gray-900 mb-4'>Training History</h4>
+						<h4 className='text-lg font-medium text-gray-900 mb-4'>{data.chart_titles.training}</h4>
 						<div className='h-80'>
-							<ResponsiveContainer width='100%' height='100%'>
-								<LineChart data={data.trainingHistory}>
-									<CartesianGrid strokeDasharray='3 3' />
-									<XAxis dataKey='epoch' />
-									<YAxis domain={[0, 1]} />
-									<Tooltip formatter={(value) => `${(Number(value) * 100).toFixed(1)}%`} />
-									<Legend />
-									<Line
-										type='monotone'
-										dataKey='accuracy'
-										stroke='#3B82F6'
-										name='Training Accuracy'
+							{data.training_history.length > 0 ? (
+								<ResponsiveContainer width='100%' height='100%'>
+									<LineChart data={data.training_history}>
+										<CartesianGrid strokeDasharray='3 3' />
+										<XAxis dataKey='epoch' />
+										<YAxis domain={[0, 1]} />
+										<Tooltip formatter={(value) => `${(Number(value) * 100).toFixed(1)}%`} />
+										<Legend />
+										<Line
+											type='monotone'
+											dataKey='accuracy'
+											stroke='#3B82F6'
+											name='Training Accuracy'
+										/>
+										<Line
+											type='monotone'
+											dataKey='val_accuracy'
+											stroke='#10B981'
+											name='Validation Accuracy'
+										/>
+										<Line type='monotone' dataKey='loss' stroke='#EF4444' name='Training Loss' />
+										<Line
+											type='monotone'
+											dataKey='val_loss'
+											stroke='#F59E0B'
+											name='Validation Loss'
+										/>
+									</LineChart>
+								</ResponsiveContainer>
+							) : (
+								<div className='h-80 flex items-center justify-center bg-gray-50 rounded-lg'>
+									<img
+										src='/api/training-plots'
+										alt='Training Plots'
+										className='max-w-full max-h-full object-contain'
+										onError={(e) => {
+											const target = e.target as HTMLImageElement;
+											target.style.display = 'none';
+											target.nextElementSibling?.classList.remove('hidden');
+										}}
 									/>
-									<Line
-										type='monotone'
-										dataKey='val_accuracy'
-										stroke='#10B981'
-										name='Validation Accuracy'
-									/>
-									<Line type='monotone' dataKey='loss' stroke='#EF4444' name='Training Loss' />
-									<Line type='monotone' dataKey='val_loss' stroke='#F59E0B' name='Validation Loss' />
-								</LineChart>
-							</ResponsiveContainer>
+									<div className='hidden text-center text-gray-500'>
+										<p>Training plots not available</p>
+										<p className='text-sm'>Train the model to generate training plots</p>
+									</div>
+								</div>
+							)}
 						</div>
 						<div className='mt-4 text-sm text-gray-600'>
 							<p>
-								<strong>Interpretation:</strong> The training shows good convergence with validation
-								metrics closely following training metrics, indicating no overfitting.
+								<strong>Interpretation:</strong> {data.interpretations.training}
 							</p>
 						</div>
 					</div>
@@ -224,10 +322,10 @@ const DataVisualization: React.FC = () => {
 
 				{activeTab === 'features' && (
 					<div>
-						<h4 className='text-lg font-medium text-gray-900 mb-4'>Feature Importance Analysis</h4>
+						<h4 className='text-lg font-medium text-gray-900 mb-4'>{data.chart_titles.features}</h4>
 						<div className='h-80'>
 							<ResponsiveContainer width='100%' height='100%'>
-								<BarChart data={data.featureImportance} layout='horizontal'>
+								<BarChart data={data.feature_importance} layout='horizontal'>
 									<CartesianGrid strokeDasharray='3 3' />
 									<XAxis type='number' domain={[0, 1]} />
 									<YAxis dataKey='feature' type='category' width={120} />
@@ -238,9 +336,65 @@ const DataVisualization: React.FC = () => {
 						</div>
 						<div className='mt-4 text-sm text-gray-600'>
 							<p>
-								<strong>Interpretation:</strong> Color features are most important (35%), followed by
-								texture (28%), indicating that visual characteristics are key for malnutrition
-								detection.
+								<strong>Interpretation:</strong> {data.interpretations.features}
+							</p>
+						</div>
+					</div>
+				)}
+
+				{activeTab === 'confusion' && (
+					<div>
+						<h4 className='text-lg font-medium text-gray-900 mb-4'>Confusion Matrix</h4>
+						<div className='h-80 flex items-center justify-center bg-gray-50 rounded-lg'>
+							<img
+								src='/api/confusion-matrix'
+								alt='Confusion Matrix'
+								className='max-w-full max-h-full object-contain'
+								onError={(e) => {
+									const target = e.target as HTMLImageElement;
+									target.style.display = 'none';
+									target.nextElementSibling?.classList.remove('hidden');
+								}}
+							/>
+							<div className='hidden text-center text-gray-500'>
+								<p>Confusion matrix not available</p>
+								<p className='text-sm'>Train the model to generate confusion matrix</p>
+							</div>
+						</div>
+						<div className='mt-4 text-sm text-gray-600'>
+							<p>
+								<strong>Interpretation:</strong> The confusion matrix shows the model's prediction
+								accuracy for each class. Diagonal values represent correct predictions, while
+								off-diagonal values show misclassifications.
+							</p>
+						</div>
+					</div>
+				)}
+
+				{activeTab === 'correlation' && (
+					<div>
+						<h4 className='text-lg font-medium text-gray-900 mb-4'>Correlation Matrix</h4>
+						<div className='h-80 flex items-center justify-center bg-gray-50 rounded-lg'>
+							<img
+								src='/api/correlation-matrix'
+								alt='Correlation Matrix'
+								className='max-w-full max-h-full object-contain'
+								onError={(e) => {
+									const target = e.target as HTMLImageElement;
+									target.style.display = 'none';
+									target.nextElementSibling?.classList.remove('hidden');
+								}}
+							/>
+							<div className='hidden text-center text-gray-500'>
+								<p>Correlation matrix not available</p>
+								<p className='text-sm'>Train the model to generate correlation matrix</p>
+							</div>
+						</div>
+						<div className='mt-4 text-sm text-gray-600'>
+							<p>
+								<strong>Interpretation:</strong> The correlation matrix shows relationships between
+								different features. High correlation values indicate strong relationships, while low
+								values suggest independence.
 							</p>
 						</div>
 					</div>
@@ -253,19 +407,18 @@ const DataVisualization: React.FC = () => {
 				<div className='grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-blue-800'>
 					<div>
 						<p>
-							<strong>🎯 Model Performance:</strong> High accuracy (89%) with balanced precision and
-							recall
+							<strong>🎯 Model Performance:</strong> {data.key_insights.model_performance}
 						</p>
 						<p>
-							<strong>📊 Data Balance:</strong> Slight class imbalance handled well by the model
+							<strong>📊 Data Balance:</strong> {data.key_insights.data_balance}
 						</p>
 					</div>
 					<div>
 						<p>
-							<strong>🔍 Feature Importance:</strong> Color and texture features are most predictive
+							<strong>🔍 Feature Importance:</strong> {data.key_insights.feature_importance}
 						</p>
 						<p>
-							<strong>📈 Training Stability:</strong> No overfitting observed during training
+							<strong>📈 Training Stability:</strong> {data.key_insights.training_stability}
 						</p>
 					</div>
 				</div>

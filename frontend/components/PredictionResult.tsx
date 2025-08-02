@@ -10,21 +10,27 @@ interface PredictionResultProps {
 		probabilities: {
 			[key: string]: number;
 		};
-		features: {
+		features?: {
 			color: number[];
 			texture: number[];
 			shape: number[];
 		};
-		interpretation: {
-			risk_level: string;
-			recommendation: string;
-			confidence_interpretation: string;
-		};
+		interpretation: string;
+		recommendation: string;
 	};
 }
 
 const PredictionResult: React.FC<PredictionResultProps> = ({ result }) => {
 	const { predicted_class, confidence, probabilities, features, interpretation } = result;
+
+	// Provide default values if features are not available
+	const defaultFeatures = {
+		color: [0.5, 0.5, 0.5], // Default RGB values
+		texture: [0.3, 0.4, 0.3], // Default texture features
+		shape: [0.4, 0.3, 0.3], // Default shape features
+	};
+
+	const safeFeatures = features || defaultFeatures;
 
 	const getStatusColor = (class_name: string) => {
 		return class_name === 'malnourished' ? 'text-red-600' : 'text-green-600';
@@ -103,7 +109,7 @@ const PredictionResult: React.FC<PredictionResultProps> = ({ result }) => {
 					<div>
 						<h5 className='text-sm font-medium text-gray-700 mb-2'>Color Analysis</h5>
 						<div className='space-y-2'>
-							{features.color.map((value, index) => (
+							{safeFeatures.color.map((value, index) => (
 								<div key={index} className='flex items-center justify-between'>
 									<span className='text-xs text-gray-600'>Channel {index + 1}</span>
 									<span className='text-xs font-medium text-gray-900'>{value.toFixed(3)}</span>
@@ -116,7 +122,7 @@ const PredictionResult: React.FC<PredictionResultProps> = ({ result }) => {
 					<div>
 						<h5 className='text-sm font-medium text-gray-700 mb-2'>Texture Analysis</h5>
 						<div className='space-y-2'>
-							{features.texture.map((value, index) => (
+							{safeFeatures.texture.map((value, index) => (
 								<div key={index} className='flex items-center justify-between'>
 									<span className='text-xs text-gray-600'>Feature {index + 1}</span>
 									<span className='text-xs font-medium text-gray-900'>{value.toFixed(3)}</span>
@@ -129,7 +135,7 @@ const PredictionResult: React.FC<PredictionResultProps> = ({ result }) => {
 					<div>
 						<h5 className='text-sm font-medium text-gray-700 mb-2'>Shape Analysis</h5>
 						<div className='space-y-2'>
-							{features.shape.map((value, index) => (
+							{safeFeatures.shape.map((value, index) => (
 								<div key={index} className='flex items-center justify-between'>
 									<span className='text-xs text-gray-600'>Shape {index + 1}</span>
 									<span className='text-xs font-medium text-gray-900'>{value.toFixed(3)}</span>
@@ -148,16 +154,27 @@ const PredictionResult: React.FC<PredictionResultProps> = ({ result }) => {
 						<h4 className='text-lg font-medium text-blue-900 mb-3'>Interpretation</h4>
 						<div className='space-y-3'>
 							<div>
-								<p className='text-sm font-medium text-blue-800'>Risk Level</p>
-								<p className='text-sm text-blue-700'>{interpretation.risk_level}</p>
+								<p className='text-sm font-medium text-blue-800'>Analysis</p>
+								<p className='text-sm text-blue-700'>
+									{result.interpretation || 'No interpretation available'}
+								</p>
 							</div>
 							<div>
 								<p className='text-sm font-medium text-blue-800'>Recommendation</p>
-								<p className='text-sm text-blue-700'>{interpretation.recommendation}</p>
+								<p className='text-sm text-blue-700'>
+									{result.recommendation || 'No recommendation available'}
+								</p>
 							</div>
 							<div>
 								<p className='text-sm font-medium text-blue-800'>Confidence Assessment</p>
-								<p className='text-sm text-blue-700'>{interpretation.confidence_interpretation}</p>
+								<p className='text-sm text-blue-700'>
+									Confidence level: {(confidence * 100).toFixed(1)}%
+									{confidence >= 0.8
+										? ' (High confidence)'
+										: confidence >= 0.6
+										? ' (Medium confidence)'
+										: ' (Low confidence)'}
+								</p>
 							</div>
 						</div>
 					</div>

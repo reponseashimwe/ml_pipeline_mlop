@@ -1,15 +1,16 @@
 'use client';
 
 import React, { useState } from 'react';
-import ImageUpload from '@/components/ImageUpload';
-import PredictionResult from '@/components/PredictionResult';
-import ModelStatus from '@/components/ModelStatus';
-import DataVisualization from '@/components/DataVisualization';
-import RetrainingPanel from '@/components/RetrainingPanel';
+import { Toaster } from 'react-hot-toast';
+import ImageUpload from '../components/ImageUpload';
+import PredictionResult from '../components/PredictionResult';
+import ModelStatus from '../components/ModelStatus';
+import DataVisualization from '../components/DataVisualization';
+import RetrainingPanel from '../components/RetrainingPanel';
 
 export default function Home() {
 	const [activeTab, setActiveTab] = useState('prediction');
-	const [predictionResult, setPredictionResult] = useState(null);
+	const [predictionResult, setPredictionResult] = useState<any>(null);
 
 	const tabs = [
 		{ id: 'prediction', label: 'Prediction', icon: '🔮' },
@@ -21,6 +22,8 @@ export default function Home() {
 
 	return (
 		<div className='min-h-screen bg-gray-50'>
+			<Toaster position='top-right' />
+
 			{/* Header */}
 			<header className='bg-white shadow-sm border-b'>
 				<div className='max-w-7xl mx-auto px-4 sm:px-6 lg:px-8'>
@@ -64,25 +67,20 @@ export default function Home() {
 			</nav>
 
 			{/* Main Content */}
-			<main className='max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8'>
+			<main className='max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6'>
 				{activeTab === 'prediction' && (
-					<div className='space-y-6'>
+					<div className='space-y-4'>
 						<div className='card'>
-							<h2 className='text-2xl font-semibold text-gray-900 mb-4'>Image Prediction</h2>
+							<h2 className='text-xl font-semibold text-gray-900 mb-3'>Image Prediction</h2>
 							<ImageUpload onPrediction={setPredictionResult} />
 						</div>
-						{predictionResult && (
-							<div className='card'>
-								<PredictionResult result={predictionResult} />
-							</div>
-						)}
 					</div>
 				)}
 
 				{activeTab === 'upload' && (
 					<div className='card'>
-						<h2 className='text-2xl font-semibold text-gray-900 mb-4'>Upload Training Data</h2>
-						<p className='text-gray-600 mb-4'>
+						<h2 className='text-xl font-semibold text-gray-900 mb-3'>Upload Training Data</h2>
+						<p className='text-gray-600 mb-3 text-sm'>
 							Upload new images to improve the model's performance through retraining.
 						</p>
 						<ImageUpload onPrediction={setPredictionResult} isTrainingData={true} />

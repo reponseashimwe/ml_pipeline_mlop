@@ -10,8 +10,9 @@ import cv2
 from PIL import Image
 import tensorflow as tf
 from tensorflow import keras
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Union
 import logging
+import io
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -20,13 +21,13 @@ logger = logging.getLogger(__name__)
 class MalnutritionPredictor:
     """Predictor for malnutrition detection with 3-class output using confidence thresholds."""
     
-    def __init__(self, model_path: str, confidence_threshold: float = 0.65):
+    def __init__(self, model_path: str, confidence_threshold: float = 0.80):
         """
-        Initialize the predictor.
+        Initialize the malnutrition predictor.
         
         Args:
-            model_path: Path to the trained model
-            confidence_threshold: Minimum confidence for binary classification (default 0.65)
+            model_path: Path to the trained model file
+            confidence_threshold: Threshold for 3-class classification (default: 0.80)
         """
         self.model_path = model_path
         self.confidence_threshold = confidence_threshold
@@ -34,8 +35,9 @@ class MalnutritionPredictor:
         self.class_names = ['malnourished', 'overnourished', 'normal']
         self.binary_classes = ['malnourished', 'overnourished']
         
-        # Load model
-        self.load_model()
+        # Load the model on initialization
+        if not self.load_model():
+            raise ValueError(f"Failed to load model from {model_path}")
         
     def load_model(self) -> bool:
         """Load the trained model."""
@@ -97,31 +99,44 @@ class MalnutritionPredictor:
         elif prob_overnourished >= self.confidence_threshold:
             return "overnourished", prob_overnourished
         else:
-            # Both probabilities are < 0.65 - classify as normal
-            # This represents the "uncertainty zone" (0.35-0.65) where child appears normal
+            # Both probabilities are < 0.80 - classify as normal
+            # This represents the "uncertainty zone" where child appears normal
             max_prob = max(prob_malnourished, prob_overnourished)
             normal_confidence = 1.0 - max_prob  # Higher when model is more uncertain
             return "normal", normal_confidence
 
-    def predict_single(self, image_path: str) -> Dict:
+    def predict_single(self, image_input: Union[str, bytes]) -> Dict:
         """
         Predict malnutrition class for a single image.
         
         Args:
-            image_path: Path to the image file
+            image_input: Either a path to the image file (str) or image bytes (bytes)
             
         Returns:
             Dictionary with prediction results
         """
-        # Preprocess image
-        processed_image = self.preprocess_image(image_path)
-        if processed_image is None:
-            return {
-                'error': 'Failed to preprocess image',
-                'image_path': image_path
-            }
-        
         try:
+            # Handle both file path and image bytes
+            if isinstance(image_input, str):
+                # File path provided
+                processed_image = self.preprocess_image(image_input)
+                image_identifier = image_input
+            elif isinstance(image_input, bytes):
+                # Image bytes provided (from API upload)
+                processed_image = self._preprocess_image_bytes(image_input)
+                image_identifier = "uploaded_image"
+            else:
+                return {
+                    'error': 'Invalid image input type. Expected file path (str) or image bytes (bytes)',
+                    'input_type': str(type(image_input))
+                }
+            
+            if processed_image is None:
+                return {
+                    'error': 'Failed to preprocess image',
+                    'image_identifier': image_identifier
+                }
+            
             # Get model prediction
             prediction = self.model.predict(processed_image, verbose=0)[0][0]
             
@@ -129,23 +144,28 @@ class MalnutritionPredictor:
             prob_overnourished = float(prediction)
             prob_malnourished = 1.0 - prob_overnourished
             
+            # Debug logging
+            logger.info(f"Raw prediction: {prediction:.4f}")
+            logger.info(f"Probabilities - Malnourished: {prob_malnourished:.4f}, Overnourished: {prob_overnourished:.4f}")
+            
             # Apply confidence-based classification
             predicted_class, confidence = self._classify_with_confidence(
                 prob_malnourished, prob_overnourished
             )
+            
+            logger.info(f"Final classification: {predicted_class} (confidence: {confidence:.4f}, threshold: {self.confidence_threshold})")
             
             # Get interpretation and recommendation
             interpretation = self._get_interpretation(predicted_class, confidence)
             recommendation = self._get_recommendation(predicted_class)
             
             return {
-                'image_path': image_path,
                 'predicted_class': predicted_class,
                 'confidence': float(confidence),
                 'probabilities': {
                     'malnourished': float(prob_malnourished),
                     'overnourished': float(prob_overnourished),
-                    'normal': float(1.0 - max(prob_malnourished, prob_overnourished)) if predicted_class == 'normal' else 0.0
+                    'normal': float(1.0 - max(prob_malnourished, prob_overnourished))
                 },
                 'interpretation': interpretation,
                 'recommendation': recommendation,
@@ -156,8 +176,43 @@ class MalnutritionPredictor:
             logger.error(f"Error during prediction: {str(e)}")
             return {
                 'error': f'Prediction failed: {str(e)}',
-                'image_path': image_path
+                'image_identifier': image_identifier if 'image_identifier' in locals() else 'unknown'
             }
+
+    def _preprocess_image_bytes(self, image_bytes: bytes, target_size: Tuple[int, int] = (128, 128)) -> Optional[np.ndarray]:
+        """
+        Preprocess image from bytes for model input.
+        
+        Args:
+            image_bytes: Raw image bytes
+            target_size: Target size for the image
+            
+        Returns:
+            Preprocessed image array or None if failed
+        """
+        try:
+            # Convert bytes to PIL Image
+            image = Image.open(io.BytesIO(image_bytes))
+            
+            # Convert to RGB if necessary
+            if image.mode != 'RGB':
+                image = image.convert('RGB')
+            
+            # Resize image
+            image = image.resize(target_size, Image.Resampling.LANCZOS)
+            
+            # Convert to numpy array and normalize
+            image_array = np.array(image, dtype=np.float32)
+            image_array = image_array / 255.0
+            
+            # Add batch dimension
+            image_array = np.expand_dims(image_array, axis=0)
+            
+            return image_array
+            
+        except Exception as e:
+            logger.error(f"Error preprocessing image bytes: {str(e)}")
+            return None
 
     def predict_batch(self, image_paths: List[str]) -> List[Dict]:
         """
@@ -229,13 +284,13 @@ class MalnutritionPredictor:
             return False
 
 
-def create_predictor(model_path: str, confidence_threshold: float = 0.65) -> MalnutritionPredictor:
+def create_predictor(model_path: str, confidence_threshold: float = 0.80) -> MalnutritionPredictor:
     """
     Factory function to create a MalnutritionPredictor instance.
     
     Args:
         model_path: Path to the trained model file
-        confidence_threshold: Confidence threshold for classification
+        confidence_threshold: Confidence threshold for classification (default: 0.80)
         
     Returns:
         MalnutritionPredictor instance
@@ -248,7 +303,7 @@ if __name__ == "__main__":
     model_path = "../models/malnutrition_model.h5"
     
     if os.path.exists(model_path):
-        predictor = create_predictor(model_path, confidence_threshold=0.65)
+        predictor = create_predictor(model_path, confidence_threshold=0.80)
         
         # Example prediction
         test_image = "../data/test/malnourished/malnourished-338_jpg.rf.e4084a36394a8785ffb48a82c7873a81.jpg"
