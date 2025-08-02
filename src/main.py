@@ -14,7 +14,7 @@ import asyncio
 import psutil  # Add this for system monitoring
 import time # Added for uptime calculation
 
-from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks
+from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks, Form
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -62,9 +62,16 @@ model_status = {
 
 # Training data storage
 training_data_dir = "../data/uploaded_training"
+pending_training_dir = "../data/pending_training"
 os.makedirs(training_data_dir, exist_ok=True)
 os.makedirs(f"{training_data_dir}/malnourished", exist_ok=True)
 os.makedirs(f"{training_data_dir}/overnourished", exist_ok=True)
+os.makedirs(pending_training_dir, exist_ok=True)
+os.makedirs(f"{pending_training_dir}/malnourished", exist_ok=True)
+os.makedirs(f"{pending_training_dir}/overnourished", exist_ok=True)
+
+# Global variables for training progress
+training_jobs = {}
 
 # Pydantic models for request/response
 class PredictionResponse(BaseModel):
@@ -256,6 +263,84 @@ async def upload_training_data(files: List[UploadFile] = File(...)):
         logger.error(f"Error in data upload: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/upload/labeled-data")
+async def upload_labeled_training_data(files: List[UploadFile] = File(...), labels: List[str] = Form(...)):
+    """
+    Upload labeled training data (images with their class labels).
+    
+    Args:
+        files: List of uploaded image files
+        labels: List of corresponding labels (malnourished/overnourished)
+        
+    Returns:
+        Upload status and file information
+    """
+    try:
+        if len(files) != len(labels):
+            raise HTTPException(status_code=400, detail="Number of files must match number of labels")
+        
+        uploaded_files = []
+        failed_files = []
+        
+        for file, label in zip(files, labels):
+            try:
+                # Validate file type
+                if not file.content_type.startswith('image/'):
+                    failed_files.append({
+                        "filename": file.filename,
+                        "error": "File must be an image"
+                    })
+                    continue
+                
+                # Validate label
+                if label not in ['malnourished', 'overnourished']:
+                    failed_files.append({
+                        "filename": file.filename,
+                        "error": f"Invalid label: {label}. Must be 'malnourished' or 'overnourished'"
+                    })
+                    continue
+                
+                # Save file to appropriate class directory
+                class_dir = os.path.join(training_data_dir, label)
+                os.makedirs(class_dir, exist_ok=True)
+                
+                # Add timestamp to avoid filename conflicts
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                safe_filename = f"uploaded_{timestamp}_{file.filename}"
+                file_path = os.path.join(class_dir, safe_filename)
+                
+                with open(file_path, "wb") as buffer:
+                    shutil.copyfileobj(file.file, buffer)
+                
+                uploaded_files.append({
+                    "filename": safe_filename,
+                    "original_name": file.filename,
+                    "label": label,
+                    "size": os.path.getsize(file_path),
+                    "path": file_path
+                })
+                
+                logger.info(f"📁 Saved labeled image: {safe_filename} -> {label}")
+                
+            except Exception as e:
+                failed_files.append({
+                    "filename": file.filename,
+                    "error": str(e)
+                })
+        
+        return {
+            "success": True,
+            "message": f"Uploaded {len(uploaded_files)} labeled files successfully",
+            "uploaded_files": uploaded_files,
+            "failed_files": failed_files,
+            "total_files": len(files),
+            "timestamp": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in labeled data upload: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/retrain", response_model=RetrainingResponse)
 async def retrain_model(background_tasks: BackgroundTasks):
     """
@@ -288,13 +373,25 @@ async def retrain_model(background_tasks: BackgroundTasks):
 
 async def retrain_model_task(job_id: str):
     """
-    Background task for model retraining.
+    Background task for model retraining with progress tracking.
     
     Args:
         job_id: Unique job identifier
     """
     try:
         logger.info(f"Starting retraining job: {job_id}")
+        
+        # Initialize job status
+        training_jobs[job_id] = {
+            "status": "training",
+            "epoch": 0,
+            "total_epochs": 20,
+            "accuracy": 0.0,
+            "loss": 1.0,
+            "val_accuracy": 0.0,
+            "val_loss": 1.0,
+            "error": None
+        }
         
         # Import our clean retraining module
         from retrain import retrain_model, merge_uploaded_data
@@ -307,20 +404,26 @@ async def retrain_model_task(job_id: str):
         merge_success = merge_uploaded_data(uploaded_data_dir, main_train_dir)
         
         if not merge_success:
+            training_jobs[job_id]["status"] = "failed"
+            training_jobs[job_id]["error"] = "Failed to merge uploaded data"
             logger.error("Failed to merge uploaded data")
             return
         
-        # 2. Run retraining using our clean module
+        # 2. Run retraining using our clean module with progress callback
         logger.info("🔄 Starting model retraining...")
         result = retrain_model(
             train_dir=main_train_dir,
             model_path="../models/malnutrition_model.h5",
-            epochs=20
+            epochs=20,
+            progress_callback=lambda epoch, metrics: update_training_progress(job_id, epoch, metrics)
         )
         
         if result["success"]:
             logger.info("✅ Retraining completed successfully!")
             logger.info(f"📊 Results: {result['metrics']}")
+            
+            # Update final status
+            training_jobs[job_id]["status"] = "completed"
             
             # 3. Reload the updated model
             global predictor
@@ -332,10 +435,61 @@ async def retrain_model_task(job_id: str):
             except Exception as e:
                 logger.error(f"Failed to reload model: {e}")
         else:
+            training_jobs[job_id]["status"] = "failed"
+            training_jobs[job_id]["error"] = result["message"]
             logger.error(f"Retraining failed: {result['message']}")
             
     except Exception as e:
-        logger.error(f"Error in retraining job {job_id}: {str(e)}")
+        error_msg = f"Error in retraining job {job_id}: {str(e)}"
+        training_jobs[job_id]["status"] = "failed"
+        training_jobs[job_id]["error"] = error_msg
+        logger.error(error_msg)
+
+def update_training_progress(job_id: str, epoch: int, metrics: dict):
+    """
+    Update training progress for a specific job.
+    
+    Args:
+        job_id: Job identifier
+        epoch: Current epoch
+        metrics: Training metrics
+    """
+    if job_id in training_jobs:
+        training_jobs[job_id].update({
+            "epoch": epoch,
+            "accuracy": metrics.get("accuracy", 0.0),
+            "loss": metrics.get("loss", 1.0),
+            "val_accuracy": metrics.get("val_accuracy", 0.0),
+            "val_loss": metrics.get("val_loss", 1.0),
+        })
+        logger.info(f"📊 Job {job_id} - Epoch {epoch}: acc={metrics.get('accuracy', 0.0):.4f}, val_acc={metrics.get('val_accuracy', 0.0):.4f}")
+
+@app.get("/training/progress/{job_id}")
+async def get_training_progress(job_id: str):
+    """
+    Get training progress for a specific job.
+    
+    Args:
+        job_id: Job identifier
+        
+    Returns:
+        Current training progress
+    """
+    if job_id not in training_jobs:
+        raise HTTPException(status_code=404, detail="Training job not found")
+    
+    job_data = training_jobs[job_id]
+    
+    return {
+        "epoch": job_data["epoch"],
+        "total_epochs": job_data["total_epochs"],
+        "accuracy": job_data["accuracy"],
+        "loss": job_data["loss"],
+        "val_accuracy": job_data["val_accuracy"],
+        "val_loss": job_data["val_loss"],
+        "status": job_data["status"],
+        "error": job_data.get("error")
+    }
 
 @app.get("/status")
 async def get_status():
@@ -505,19 +659,42 @@ async def get_visualization_data():
         training_history = []
         training_interpretation = "No training history available."
         model_path = "../models/malnutrition_model.h5"
-        if os.path.exists(model_path):
-            # In a real implementation, this would read from training logs
-            # For now, we'll use a simplified version based on typical MobileNetV2 training
-            training_history = [
-                {"epoch": 1, "accuracy": 0.65, "loss": 0.8, "val_accuracy": 0.62, "val_loss": 0.85},
-                {"epoch": 5, "accuracy": 0.72, "loss": 0.6, "val_accuracy": 0.7, "val_loss": 0.65},
-                {"epoch": 10, "accuracy": 0.78, "loss": 0.5, "val_accuracy": 0.76, "val_loss": 0.55},
-                {"epoch": 15, "accuracy": 0.82, "loss": 0.4, "val_accuracy": 0.8, "val_loss": 0.45},
-                {"epoch": 20, "accuracy": 0.85, "loss": 0.35, "val_accuracy": 0.83, "val_loss": 0.4},
-                {"epoch": 25, "accuracy": 0.87, "loss": 0.3, "val_accuracy": 0.85, "val_loss": 0.35},
-                {"epoch": 30, "accuracy": 0.89, "loss": 0.25, "val_accuracy": 0.87, "val_loss": 0.3},
-            ]
-            training_interpretation = "The training shows good convergence with validation metrics closely following training metrics, indicating no overfitting."
+        
+        # Try to read actual training history from saved logs
+        training_log_path = "../models/malnutrition_model_history.json"
+        if os.path.exists(training_log_path):
+            try:
+                with open(training_log_path, 'r') as f:
+                    training_history = json.load(f)
+                if training_history:
+                    training_interpretation = "Training history loaded from saved logs."
+                else:
+                    training_interpretation = "Training logs exist but are empty."
+            except Exception as e:
+                logger.warning(f"Could not read training history: {e}")
+                training_interpretation = "Could not load training history from logs."
+        elif os.path.exists(model_path):
+            # If no training logs, check if we have any recent training jobs
+            if training_jobs:
+                # Get the most recent completed job
+                recent_jobs = [job for job in training_jobs.values() if job.get("status") == "completed"]
+                if recent_jobs:
+                    # Create a basic history from the job data
+                    training_history = [
+                        {
+                            "epoch": job.get("epoch", 0),
+                            "accuracy": job.get("accuracy", 0.0),
+                            "loss": job.get("loss", 1.0),
+                            "val_accuracy": job.get("val_accuracy", 0.0),
+                            "val_loss": job.get("val_loss", 1.0)
+                        }
+                        for job in recent_jobs
+                    ]
+                    training_interpretation = "Training history based on recent training job."
+                else:
+                    training_interpretation = "Model exists but no recent training history available."
+            else:
+                training_interpretation = "Model exists but no training history available."
         
         # Feature importance based on actual MobileNetV2 architecture analysis
         # These values represent the relative importance of different feature types
@@ -612,7 +789,7 @@ async def get_confusion_matrix():
     Get confusion matrix image for the model.
     """
     try:
-        confusion_matrix_path = "../models/confusion_matrix.png"
+        confusion_matrix_path = "../models/malnutrition_model_confusion_matrix.png"
         
         if os.path.exists(confusion_matrix_path):
             return FileResponse(
@@ -634,7 +811,7 @@ async def get_correlation_matrix():
     Get correlation matrix image for the model features.
     """
     try:
-        correlation_matrix_path = "../models/correlation_matrix.png"
+        correlation_matrix_path = "../models/malnutrition_model_correlation_matrix.png"
         
         if os.path.exists(correlation_matrix_path):
             return FileResponse(
@@ -656,7 +833,7 @@ async def get_training_plots():
     Get training plots (accuracy, loss curves) as images.
     """
     try:
-        training_plots_path = "../models/training_plots.png"
+        training_plots_path = "../models/malnutrition_model_training_plots.png"
         
         if os.path.exists(training_plots_path):
             return FileResponse(
