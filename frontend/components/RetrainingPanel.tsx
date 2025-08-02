@@ -1,21 +1,11 @@
 'use client';
 
-import React, { useState, useCallback, useEffect } from 'react';
-import { useDropzone } from 'react-dropzone';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { toast } from 'react-hot-toast';
 import api from '../lib/api';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
 type RetrainingStatus = 'idle' | 'starting' | 'training' | 'completed' | 'failed';
-type ImageLabel = 'malnourished' | 'overnourished' | 'unlabeled';
-
-interface PendingImage {
-	id: string;
-	file: File;
-	preview: string;
-	label: ImageLabel;
-	name: string;
-	size: number;
-}
 
 interface TrainingProgress {
 	epoch: number;
@@ -27,91 +17,46 @@ interface TrainingProgress {
 	status: string;
 }
 
+interface TrainingHistoryPoint {
+	epoch: number;
+	accuracy: number;
+	loss: number;
+	val_accuracy: number;
+	val_loss: number;
+}
+
 const RetrainingPanel: React.FC = () => {
 	const [status, setStatus] = useState<RetrainingStatus>('idle');
-	const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
 	const [trainingProgress, setTrainingProgress] = useState<TrainingProgress | null>(null);
+	const [trainingHistory, setTrainingHistory] = useState<TrainingHistoryPoint[]>([]);
 	const [logs, setLogs] = useState<string[]>([]);
 	const [isPolling, setIsPolling] = useState(false);
+	const logsEndRef = useRef<HTMLDivElement>(null);
 
-	// Dropzone for image upload
-	const onDrop = useCallback((acceptedFiles: File[]) => {
-		const newImages: PendingImage[] = acceptedFiles.map((file) => ({
-			id: Math.random().toString(36).substr(2, 9),
-			file,
-			preview: URL.createObjectURL(file),
-			label: 'unlabeled' as ImageLabel,
-			name: file.name,
-			size: file.size,
-		}));
-
-		setPendingImages((prev) => [...prev, ...newImages]);
-		toast.success(`Added ${acceptedFiles.length} images for labeling`);
+	// Load existing training history on mount
+	useEffect(() => {
+		loadExistingTrainingHistory();
 	}, []);
 
-	const { getRootProps, getInputProps, isDragActive } = useDropzone({
-		onDrop,
-		accept: {
-			'image/*': ['.jpeg', '.jpg', '.png'],
-		},
-		multiple: true,
-	});
-
-	// Label an image
-	const labelImage = (imageId: string, label: ImageLabel) => {
-		setPendingImages((prev) => prev.map((img) => (img.id === imageId ? { ...img, label } : img)));
-	};
-
-	// Remove an image
-	const removeImage = (imageId: string) => {
-		setPendingImages((prev) => {
-			const image = prev.find((img) => img.id === imageId);
-			if (image) {
-				URL.revokeObjectURL(image.preview);
-			}
-			return prev.filter((img) => img.id !== imageId);
-		});
-	};
-
-	// Upload labeled images
-	const uploadLabeledImages = async () => {
-		const labeledImages = pendingImages.filter((img) => img.label !== 'unlabeled');
-
-		if (labeledImages.length === 0) {
-			toast.error('Please label at least one image before uploading');
-			return;
-		}
-
+	const loadExistingTrainingHistory = async () => {
 		try {
-			setLogs((prev) => [...prev, '📤 Uploading labeled images...']);
-
-			// Create FormData with labeled images
-			const formData = new FormData();
-			labeledImages.forEach((img) => {
-				formData.append('files', img.file);
-				formData.append('labels', img.label);
-			});
-
-			const response = await api.uploadLabeledTrainingData(formData);
-
-			if (response.success) {
-				// Clear uploaded images
-				labeledImages.forEach((img) => URL.revokeObjectURL(img.preview));
-				setPendingImages((prev) => prev.filter((img) => img.label === 'unlabeled'));
-
-				setLogs((prev) => [...prev, `✅ Uploaded ${labeledImages.length} labeled images`]);
-				toast.success(`Successfully uploaded ${labeledImages.length} labeled images`);
-			} else {
-				throw new Error(response.message);
+			const visualizationData = await api.getVisualizationData();
+			if (visualizationData.training_history && visualizationData.training_history.length > 0) {
+				setTrainingHistory(visualizationData.training_history);
 			}
 		} catch (error) {
-			setLogs((prev) => [
-				...prev,
-				`❌ Upload failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
-			]);
-			toast.error('Failed to upload labeled images');
+			console.error('Failed to load existing training history:', error);
 		}
 	};
+
+	// Auto-scroll logs to bottom
+	const scrollToBottom = () => {
+		logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+	};
+
+	useEffect(() => {
+		scrollToBottom();
+	}, [logs]);
 
 	// Start retraining
 	const handleRetrain = async () => {
@@ -152,34 +97,103 @@ const RetrainingPanel: React.FC = () => {
 	const startProgressPolling = async (jobId: string) => {
 		const pollInterval = setInterval(async () => {
 			try {
+				console.log(`🔄 Polling progress for job: ${jobId}`);
 				const progress = await api.getTrainingProgress(jobId);
+				console.log(`📊 Progress received:`, progress);
 
 				if (progress.status === 'completed') {
 					setStatus('completed');
 					setTrainingProgress(progress);
 					setLogs((prev) => [...prev, '✅ Training completed successfully!']);
+					setLogs((prev) => [...prev, '🎉 Model updated and ready for use!']);
 					setIsPolling(false);
 					clearInterval(pollInterval);
-					toast.success('Model retraining completed!');
+					toast.success('Model retraining completed!', { duration: 5000 });
 				} else if (progress.status === 'failed') {
 					setStatus('failed');
 					setLogs((prev) => [...prev, `❌ Training failed: ${progress.error}`]);
 					setIsPolling(false);
 					clearInterval(pollInterval);
 					toast.error('Model retraining failed');
-				} else {
+				} else if (progress.status === 'training' || progress.status === 'starting') {
 					setTrainingProgress(progress);
+
+					// Add to training history
+					setTrainingHistory((prev) => {
+						const newPoint: TrainingHistoryPoint = {
+							epoch: progress.epoch,
+							accuracy: progress.accuracy,
+							loss: progress.loss,
+							val_accuracy: progress.val_accuracy,
+							val_loss: progress.val_loss,
+						};
+
+						// Check if we already have this epoch
+						const existingIndex = prev.findIndex((p) => p.epoch === progress.epoch);
+						if (existingIndex >= 0) {
+							// Update existing point
+							const updated = [...prev];
+							updated[existingIndex] = newPoint;
+							return updated;
+						} else {
+							// Add new point
+							return [...prev, newPoint];
+						}
+					});
+
+					// Enhanced terminal-like logging
+					const epochLog = `📊 Epoch ${progress.epoch}/${progress.total_epochs}`;
+					const accuracyLog = `   Accuracy: ${(progress.accuracy * 100).toFixed(2)}%`;
+					const lossLog = `   Loss: ${progress.loss.toFixed(4)}`;
+					const valAccuracyLog = `   Val Accuracy: ${(progress.val_accuracy * 100).toFixed(2)}%`;
+					const valLossLog = `   Val Loss: ${progress.val_loss.toFixed(4)}`;
+
+					// Check if validation accuracy improved
+					const prevEpoch = trainingHistory.find((p) => p.epoch === progress.epoch - 1);
+					let improvementLog = '';
+					if (prevEpoch) {
+						if (progress.val_accuracy > prevEpoch.val_accuracy) {
+							improvementLog = `   ✅ Val accuracy improved from ${(prevEpoch.val_accuracy * 100).toFixed(
+								2
+							)}%`;
+						} else if (progress.val_accuracy < prevEpoch.val_accuracy) {
+							improvementLog = `   ⚠️ Val accuracy decreased from ${(
+								prevEpoch.val_accuracy * 100
+							).toFixed(2)}%`;
+						} else {
+							improvementLog = `   ➡️ Val accuracy unchanged`;
+						}
+					}
+
 					setLogs((prev) => [
 						...prev,
-						`📊 Epoch ${progress.epoch}/${progress.total_epochs} - Accuracy: ${(
-							progress.accuracy * 100
-						).toFixed(2)}%`,
+						epochLog,
+						accuracyLog,
+						lossLog,
+						valAccuracyLog,
+						valLossLog,
+						...(improvementLog ? [improvementLog] : []),
+						'',
 					]);
+				} else {
+					console.log(`⚠️ Unknown status: ${progress.status}`);
 				}
 			} catch (error) {
-				console.error('Error polling training progress:', error);
+				console.error('❌ Error polling training progress:', error);
+				setLogs((prev) => [
+					...prev,
+					`⚠️ Progress polling error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+				]);
+
+				// If we get too many errors, stop polling
+				const errorCount = logs.filter((log) => log.includes('Progress polling error')).length;
+				if (errorCount > 5) {
+					setLogs((prev) => [...prev, '❌ Too many polling errors, stopping progress updates']);
+					setIsPolling(false);
+					clearInterval(pollInterval);
+				}
 			}
-		}, 2000); // Poll every 2 seconds
+		}, 3000); // Poll every 3 seconds
 
 		// Cleanup on unmount
 		return () => clearInterval(pollInterval);
@@ -188,128 +202,14 @@ const RetrainingPanel: React.FC = () => {
 	// Reset status
 	const resetStatus = () => {
 		setStatus('idle');
-		setLogs([]);
 		setTrainingProgress(null);
+		setTrainingHistory([]);
+		setLogs([]);
 		setIsPolling(false);
 	};
 
-	// Cleanup on unmount
-	useEffect(() => {
-		return () => {
-			pendingImages.forEach((img) => URL.revokeObjectURL(img.preview));
-		};
-	}, [pendingImages]);
-
-	const labeledCount = pendingImages.filter((img) => img.label !== 'unlabeled').length;
-	const unlabeledCount = pendingImages.filter((img) => img.label === 'unlabeled').length;
-
 	return (
 		<div className='space-y-6'>
-			{/* Image Upload and Labeling Section */}
-			<div className='bg-white p-6 rounded-lg shadow-md'>
-				<h3 className='text-lg font-semibold mb-4'>📚 Upload Training Images</h3>
-				<p className='text-gray-600 mb-4 text-sm'>
-					Upload images and label them for model retraining. Images will be organized by class.
-				</p>
-
-				{/* Drag & Drop Area */}
-				<div
-					{...getRootProps()}
-					className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors ${
-						isDragActive ? 'border-blue-500 bg-blue-50' : 'border-gray-300 hover:border-gray-400'
-					}`}
-				>
-					<input {...getInputProps()} />
-					<div className='space-y-2'>
-						<p className='text-gray-600'>
-							{isDragActive ? 'Drop images here...' : 'Drag & drop images here, or click to select'}
-						</p>
-						<p className='text-xs text-gray-500'>Supports: JPG, JPEG, PNG (Multiple files)</p>
-					</div>
-				</div>
-
-				{/* Pending Images */}
-				{pendingImages.length > 0 && (
-					<div className='mt-6'>
-						<div className='flex justify-between items-center mb-4'>
-							<h4 className='font-semibold'>📋 Pending Images ({pendingImages.length})</h4>
-							<div className='text-sm text-gray-600'>
-								<span className='text-green-600'>{labeledCount} labeled</span>
-								{' • '}
-								<span className='text-orange-600'>{unlabeledCount} unlabeled</span>
-							</div>
-						</div>
-
-						<div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-h-96 overflow-y-auto'>
-							{pendingImages.map((image) => (
-								<div key={image.id} className='border rounded-lg p-3 bg-gray-50'>
-									<div className='relative mb-3'>
-										<img
-											src={image.preview}
-											alt={image.name}
-											className='w-full h-32 object-cover rounded'
-										/>
-										<button
-											onClick={() => removeImage(image.id)}
-											className='absolute top-1 right-1 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs hover:bg-red-600'
-										>
-											×
-										</button>
-									</div>
-
-									<div className='space-y-2'>
-										<p className='text-xs text-gray-600 truncate'>{image.name}</p>
-										<p className='text-xs text-gray-500'>{(image.size / 1024).toFixed(1)} KB</p>
-
-										{/* Labeling Buttons */}
-										<div className='flex space-x-1'>
-											<button
-												onClick={() => labelImage(image.id, 'malnourished')}
-												className={`flex-1 px-2 py-1 text-xs rounded ${
-													image.label === 'malnourished'
-														? 'bg-red-500 text-white'
-														: 'bg-red-100 text-red-700 hover:bg-red-200'
-												}`}
-											>
-												Malnourished
-											</button>
-											<button
-												onClick={() => labelImage(image.id, 'overnourished')}
-												className={`flex-1 px-2 py-1 text-xs rounded ${
-													image.label === 'overnourished'
-														? 'bg-orange-500 text-white'
-														: 'bg-orange-100 text-orange-700 hover:bg-orange-200'
-												}`}
-											>
-												Overnourished
-											</button>
-										</div>
-
-										{image.label !== 'unlabeled' && (
-											<div className='text-xs text-green-600 font-medium'>
-												✓ Labeled as {image.label}
-											</div>
-										)}
-									</div>
-								</div>
-							))}
-						</div>
-
-						{/* Upload Button */}
-						{labeledCount > 0 && (
-							<div className='mt-4 flex justify-end'>
-								<button
-									onClick={uploadLabeledImages}
-									className='px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors'
-								>
-									📤 Upload {labeledCount} Labeled Images
-								</button>
-							</div>
-						)}
-					</div>
-				)}
-			</div>
-
 			{/* Retraining Section */}
 			<div className='bg-white p-6 rounded-lg shadow-md'>
 				<h3 className='text-lg font-semibold mb-4'>🔄 Model Retraining</h3>
@@ -322,22 +222,25 @@ const RetrainingPanel: React.FC = () => {
 						<p className='text-sm text-gray-600'>
 							This process will use both original and newly uploaded training data.
 						</p>
+						<p className='text-xs text-gray-500 mt-1'>
+							💡 Tip: Upload at least 20 images per class for better results
+						</p>
 					</div>
 
 					<button
 						onClick={handleRetrain}
 						disabled={status === 'starting' || status === 'training'}
-						className={`px-6 py-2 rounded-lg font-medium transition-colors ${
+						className={`px-6 py-3 rounded-lg font-medium transition-colors ${
 							status === 'starting' || status === 'training'
 								? 'bg-gray-300 text-gray-500 cursor-not-allowed'
 								: 'bg-blue-600 text-white hover:bg-blue-700'
 						}`}
 					>
 						{status === 'starting'
-							? 'Starting...'
+							? '🚀 Starting...'
 							: status === 'training'
-							? 'Training...'
-							: 'Start Retraining'}
+							? '⏳ Training...'
+							: '🔄 Start Retraining'}
 					</button>
 				</div>
 
@@ -348,15 +251,25 @@ const RetrainingPanel: React.FC = () => {
 							<div
 								className={`w-3 h-3 rounded-full mr-2 ${
 									status === 'starting'
-										? 'bg-yellow-500'
+										? 'bg-yellow-500 animate-pulse'
 										: status === 'training'
-										? 'bg-blue-500'
+										? 'bg-blue-500 animate-pulse'
 										: status === 'completed'
 										? 'bg-green-500'
 										: 'bg-red-500'
 								}`}
 							></div>
 							<span className='font-medium capitalize'>{status}</span>
+							{status === 'training' && (
+								<span className='ml-2 text-sm text-gray-600'>
+									(Est.{' '}
+									{Math.max(
+										5,
+										(trainingProgress?.total_epochs || 20) - (trainingProgress?.epoch || 0)
+									)}{' '}
+									min remaining)
+								</span>
+							)}
 						</div>
 
 						{/* Training Progress */}
@@ -370,9 +283,9 @@ const RetrainingPanel: React.FC = () => {
 								</div>
 
 								{/* Progress Bar */}
-								<div className='w-full bg-gray-200 rounded-full h-2 mb-2'>
+								<div className='w-full bg-gray-200 rounded-full h-3 mb-3'>
 									<div
-										className='bg-blue-600 h-2 rounded-full transition-all duration-300'
+										className='bg-blue-600 h-3 rounded-full transition-all duration-300'
 										style={{
 											width: `${(trainingProgress.epoch / trainingProgress.total_epochs) * 100}%`,
 										}}
@@ -381,25 +294,29 @@ const RetrainingPanel: React.FC = () => {
 
 								{/* Metrics */}
 								<div className='grid grid-cols-2 gap-4 text-sm'>
-									<div>
-										<span className='text-gray-600'>Accuracy:</span>
-										<span className='ml-2 font-medium'>
-											{(trainingProgress.accuracy * 100).toFixed(2)}%
+									<div className='bg-blue-50 p-2 rounded'>
+										<span className='text-gray-600'>Training Accuracy:</span>
+										<span className='ml-2 font-bold text-blue-700'>
+											{(trainingProgress.accuracy * 100).toFixed(1)}%
 										</span>
 									</div>
-									<div>
-										<span className='text-gray-600'>Loss:</span>
-										<span className='ml-2 font-medium'>{trainingProgress.loss.toFixed(4)}</span>
-									</div>
-									<div>
-										<span className='text-gray-600'>Val Accuracy:</span>
-										<span className='ml-2 font-medium'>
-											{(trainingProgress.val_accuracy * 100).toFixed(2)}%
+									<div className='bg-green-50 p-2 rounded'>
+										<span className='text-gray-600'>Validation Accuracy:</span>
+										<span className='ml-2 font-bold text-green-700'>
+											{(trainingProgress.val_accuracy * 100).toFixed(1)}%
 										</span>
 									</div>
-									<div>
-										<span className='text-gray-600'>Val Loss:</span>
-										<span className='ml-2 font-medium'>{trainingProgress.val_loss.toFixed(4)}</span>
+									<div className='bg-orange-50 p-2 rounded'>
+										<span className='text-gray-600'>Training Loss:</span>
+										<span className='ml-2 font-medium text-orange-700'>
+											{trainingProgress.loss.toFixed(4)}
+										</span>
+									</div>
+									<div className='bg-purple-50 p-2 rounded'>
+										<span className='text-gray-600'>Validation Loss:</span>
+										<span className='ml-2 font-medium text-purple-700'>
+											{trainingProgress.val_loss.toFixed(4)}
+										</span>
 									</div>
 								</div>
 							</div>
@@ -408,11 +325,53 @@ const RetrainingPanel: React.FC = () => {
 						{/* Logs */}
 						{logs.length > 0 && (
 							<div className='mt-3'>
-								<h4 className='text-sm font-medium mb-2'>Progress Log:</h4>
-								<div className='bg-black text-green-400 p-3 rounded text-sm font-mono max-h-40 overflow-y-auto'>
+								<div className='flex items-center justify-between mb-2'>
+									<h4 className='text-sm font-medium'>🖥️ Training Terminal</h4>
+									<div className='flex items-center space-x-2'>
+										<div className='flex items-center space-x-1'>
+											<div className='w-2 h-2 bg-red-500 rounded-full'></div>
+											<div className='w-2 h-2 bg-yellow-500 rounded-full'></div>
+											<div className='w-2 h-2 bg-green-500 rounded-full'></div>
+										</div>
+										<span className='text-xs text-gray-500'>Live Output</span>
+									</div>
+								</div>
+								<div className='bg-gray-900 text-green-400 p-4 rounded-lg text-sm font-mono h-96 overflow-y-auto border border-gray-700 shadow-inner'>
+									<div className='mb-2 text-gray-400 text-xs'>
+										<span className='text-yellow-400'>$</span> python retrain_model.py
+									</div>
 									{logs.map((log, index) => (
-										<div key={index}>{log}</div>
+										<div
+											key={index}
+											className={`mb-1 ${
+												log.startsWith('📊')
+													? 'text-blue-400 font-semibold'
+													: log.startsWith('✅')
+													? 'text-green-400'
+													: log.startsWith('❌')
+													? 'text-red-400'
+													: log.startsWith('⚠️')
+													? 'text-yellow-400'
+													: log.startsWith('🚀')
+													? 'text-purple-400'
+													: log.startsWith('⏳')
+													? 'text-cyan-400'
+													: log.startsWith('   ')
+													? 'text-gray-300 ml-4'
+													: log === ''
+													? 'text-transparent'
+													: 'text-green-400'
+											}`}
+										>
+											{log}
+										</div>
 									))}
+									<div ref={logsEndRef} />
+									{status === 'training' && (
+										<div className='text-green-400 animate-pulse'>
+											<span className='inline-block w-2 h-4 bg-green-400'></span>
+										</div>
+									)}
 								</div>
 							</div>
 						)}
@@ -423,23 +382,21 @@ const RetrainingPanel: React.FC = () => {
 								onClick={resetStatus}
 								className='mt-3 px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700'
 							>
-								Reset
+								🔄 Reset
 							</button>
 						)}
 					</div>
 				)}
 
 				{/* Information */}
-				<div className='bg-blue-50 p-4 rounded-lg'>
-					<h4 className='font-medium text-blue-900 mb-2'>What happens during retraining?</h4>
-					<ul className='text-sm text-blue-800 space-y-1'>
-						<li>• Uses existing model as a pre-trained base</li>
-						<li>• Incorporates newly uploaded labeled training data</li>
-						<li>• Applies advanced data augmentation</li>
-						<li>• Optimizes model weights for better performance</li>
-						<li>• Automatically saves the improved model</li>
-						<li>• Provides real-time training progress</li>
-					</ul>
+				<div className='bg-blue-50 p-4 rounded-lg mt-4'>
+					<h4 className='font-medium text-blue-900 mb-2'>🎯 Retraining Process</h4>
+					<div className='text-sm text-blue-800'>
+						<p>• Uses existing model + new uploaded data</p>
+						<p>• Applies data augmentation & optimization</p>
+						<p>• Saves improved model automatically</p>
+						<p>• Clears uploaded data after completion</p>
+					</div>
 				</div>
 			</div>
 		</div>

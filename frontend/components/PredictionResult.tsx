@@ -5,23 +5,26 @@ import { CheckCircle, AlertTriangle, Info } from 'lucide-react';
 
 interface PredictionResultProps {
 	result: {
-		predicted_class: string;
+		class?: string;
+		predicted_class?: string;
 		confidence: number;
 		probabilities: {
-			[key: string]: number;
+			malnourished: number;
+			overnourished: number;
+			normal: number;
 		};
 		features?: {
 			color: number[];
 			texture: number[];
 			shape: number[];
 		};
-		interpretation: string;
-		recommendation: string;
 	};
 }
 
 const PredictionResult: React.FC<PredictionResultProps> = ({ result }) => {
-	const { predicted_class, confidence, probabilities, features, interpretation } = result;
+	// Handle both 'class' and 'predicted_class' field names
+	const predicted_class = result.class || result.predicted_class || 'unknown';
+	const { confidence, probabilities, features } = result;
 
 	// Provide default values if features are not available
 	const defaultFeatures = {
@@ -151,18 +154,13 @@ const PredictionResult: React.FC<PredictionResultProps> = ({ result }) => {
 				<div className='flex items-start space-x-3'>
 					<Info className='w-5 h-5 text-blue-500 mt-0.5' />
 					<div className='flex-1'>
-						<h4 className='text-lg font-medium text-blue-900 mb-3'>Interpretation</h4>
+						<h4 className='text-lg font-medium text-blue-900 mb-3'>Analysis Summary</h4>
 						<div className='space-y-3'>
 							<div>
-								<p className='text-sm font-medium text-blue-800'>Analysis</p>
+								<p className='text-sm font-medium text-blue-800'>Classification</p>
 								<p className='text-sm text-blue-700'>
-									{result.interpretation || 'No interpretation available'}
-								</p>
-							</div>
-							<div>
-								<p className='text-sm font-medium text-blue-800'>Recommendation</p>
-								<p className='text-sm text-blue-700'>
-									{result.recommendation || 'No recommendation available'}
+									The image has been classified as <strong>{predicted_class}</strong> with{' '}
+									{(confidence * 100).toFixed(1)}% confidence.
 								</p>
 							</div>
 							<div>
@@ -174,6 +172,16 @@ const PredictionResult: React.FC<PredictionResultProps> = ({ result }) => {
 										: confidence >= 0.6
 										? ' (Medium confidence)'
 										: ' (Low confidence)'}
+								</p>
+							</div>
+							<div>
+								<p className='text-sm font-medium text-blue-800'>Next Steps</p>
+								<p className='text-sm text-blue-700'>
+									{confidence >= 0.8
+										? 'High confidence prediction - consider this result reliable for decision making.'
+										: confidence >= 0.6
+										? 'Medium confidence prediction - consider additional assessment or retesting.'
+										: 'Low confidence prediction - manual review recommended for accurate assessment.'}
 								</p>
 							</div>
 						</div>

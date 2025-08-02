@@ -3,10 +3,10 @@ import axios, { AxiosInstance, AxiosResponse } from 'axios';
 // API Configuration
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
 
-// Create axios instance with default config
-const axiosClient: AxiosInstance = axios.create({
-	baseURL: API_BASE_URL,
-	timeout: 30000,
+// Create axios client with base configuration
+const axiosClient = axios.create({
+	baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001',
+	timeout: 60000, // Increase timeout to 60 seconds for training operations
 	headers: {
 		'Content-Type': 'application/json',
 	},
@@ -38,6 +38,7 @@ axiosClient.interceptors.response.use(
 
 // API Types
 export interface PredictionResult {
+	class: string;
 	predicted_class: string;
 	confidence: number;
 	probabilities: {
@@ -47,6 +48,12 @@ export interface PredictionResult {
 	};
 	interpretation: string;
 	recommendation: string;
+	confidence_threshold: number;
+	features?: {
+		color: number[];
+		texture: number[];
+		shape: number[];
+	};
 }
 
 export interface ModelStatus {
@@ -129,17 +136,13 @@ export interface VisualizationData {
 
 // API Functions
 export const api = {
-	// Single image prediction
-	predictImage: async (imageFile: File): Promise<PredictionResult> => {
-		const formData = new FormData();
-		formData.append('image', imageFile);
-
+	// Predict a single image
+	predictImage: async (formData: FormData): Promise<PredictionResult> => {
 		const response = await axiosClient.post('/predict/image', formData, {
 			headers: {
 				'Content-Type': 'multipart/form-data',
 			},
 		});
-
 		return response.data;
 	},
 
@@ -197,6 +200,12 @@ export const api = {
 	// Get API health
 	getHealth: async (): Promise<{ status: string; message: string }> => {
 		const response = await axiosClient.get('/');
+		return response.data;
+	},
+
+	// Get existing uploaded training images
+	getUploadedImages: async (): Promise<{ success: boolean; images: any[]; total_count: number }> => {
+		const response = await axiosClient.get('/api/uploaded-images');
 		return response.data;
 	},
 };

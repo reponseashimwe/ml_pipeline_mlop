@@ -38,7 +38,7 @@ class MalnutritionPredictor:
         # Load the model on initialization
         if not self.load_model():
             raise ValueError(f"Failed to load model from {model_path}")
-        
+    
     def load_model(self) -> bool:
         """Load the trained model."""
         try:
@@ -94,16 +94,26 @@ class MalnutritionPredictor:
         Returns:
             Tuple of (predicted_class, confidence)
         """
-        if prob_malnourished >= self.confidence_threshold:
+        # For a binary model, prob_malnourished + prob_overnourished = 1.0
+        # If both probabilities are close to 0.5, it suggests uncertainty (possibly a normal child)
+        
+        # Check if both probabilities are below threshold (uncertainty zone)
+        if prob_malnourished < self.confidence_threshold and prob_overnourished < self.confidence_threshold:
+            # This suggests the model is uncertain - likely a normal child
+            # Calculate confidence as how close we are to 0.5 (perfect uncertainty)
+            uncertainty = abs(prob_malnourished - 0.5) + abs(prob_overnourished - 0.5)
+            normal_confidence = 1.0 - uncertainty  # Higher confidence when closer to 0.5
+            return "normal", normal_confidence
+        elif prob_malnourished >= self.confidence_threshold:
             return "malnourished", prob_malnourished
         elif prob_overnourished >= self.confidence_threshold:
             return "overnourished", prob_overnourished
         else:
-            # Both probabilities are < 0.80 - classify as normal
-            # This represents the "uncertainty zone" where child appears normal
-            max_prob = max(prob_malnourished, prob_overnourished)
-            normal_confidence = 1.0 - max_prob  # Higher when model is more uncertain
-            return "normal", normal_confidence
+            # Fallback: choose the higher probability
+            if prob_malnourished > prob_overnourished:
+                return "malnourished", prob_malnourished
+            else:
+                return "overnourished", prob_overnourished
 
     def predict_single(self, image_input: Union[str, bytes]) -> Dict:
         """
@@ -159,13 +169,18 @@ class MalnutritionPredictor:
             interpretation = self._get_interpretation(predicted_class, confidence)
             recommendation = self._get_recommendation(predicted_class)
             
+            # Calculate normal probability based on uncertainty
+            uncertainty = abs(prob_malnourished - 0.5) + abs(prob_overnourished - 0.5)
+            prob_normal = max(0.0, 1.0 - uncertainty)  # Higher when model is uncertain
+            
             return {
+                'class': predicted_class,  # Add 'class' field for frontend compatibility
                 'predicted_class': predicted_class,
                 'confidence': float(confidence),
                 'probabilities': {
                     'malnourished': float(prob_malnourished),
                     'overnourished': float(prob_overnourished),
-                    'normal': float(1.0 - max(prob_malnourished, prob_overnourished))
+                    'normal': float(prob_normal)
                 },
                 'interpretation': interpretation,
                 'recommendation': recommendation,
@@ -178,7 +193,7 @@ class MalnutritionPredictor:
                 'error': f'Prediction failed: {str(e)}',
                 'image_identifier': image_identifier if 'image_identifier' in locals() else 'unknown'
             }
-
+    
     def _preprocess_image_bytes(self, image_bytes: bytes, target_size: Tuple[int, int] = (128, 128)) -> Optional[np.ndarray]:
         """
         Preprocess image from bytes for model input.
@@ -213,7 +228,7 @@ class MalnutritionPredictor:
         except Exception as e:
             logger.error(f"Error preprocessing image bytes: {str(e)}")
             return None
-
+    
     def predict_batch(self, image_paths: List[str]) -> List[Dict]:
         """
         Predict malnutrition classes for multiple images.
@@ -238,7 +253,7 @@ class MalnutritionPredictor:
             'normal': f"Child appears to have normal nutritional status (confidence: {confidence:.2f})"
         }
         return interpretations.get(predicted_class, "Unknown classification")
-
+    
     def _get_recommendation(self, predicted_class: str) -> str:
         """Get actionable recommendation based on prediction."""
         recommendations = {
@@ -304,8 +319,8 @@ if __name__ == "__main__":
     
     if os.path.exists(model_path):
         predictor = create_predictor(model_path, confidence_threshold=0.80)
-        
-        # Example prediction
+    
+    # Example prediction
         test_image = "../data/test/malnourished/malnourished-338_jpg.rf.e4084a36394a8785ffb48a82c7873a81.jpg"
         if os.path.exists(test_image):
             result = predictor.predict_single(test_image)

@@ -5,18 +5,23 @@ Handles incremental training with new uploaded data.
 """
 
 import os
+import shutil
+import logging
 import numpy as np
 import tensorflow as tf
 from tensorflow import keras
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend to prevent GUI crashes in threads
+import matplotlib.pyplot as plt
+import seaborn as sns
+from PIL import Image
+from typing import Dict, Tuple, Optional, List
+import json
 from tensorflow.keras import layers, models, optimizers, regularizers
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from tensorflow.keras.applications import MobileNetV2
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCheckpoint
-import logging
 from datetime import datetime
-from typing import Dict, Tuple
-import matplotlib.pyplot as plt
-import seaborn as sns
 from sklearn.metrics import confusion_matrix
 
 # Configure logging
@@ -220,17 +225,27 @@ def retrain_model(train_dir: str = "../data/train",
         class ProgressCallback(tf.keras.callbacks.Callback):
             def on_epoch_end(self, epoch, logs=None):
                 if progress_callback:
-                    metrics = {
-                        "accuracy": logs.get("accuracy", 0.0),
-                        "loss": logs.get("loss", 1.0),
-                        "val_accuracy": logs.get("val_accuracy", 0.0),
-                        "val_loss": logs.get("val_loss", 1.0),
-                    }
-                    progress_callback(epoch + 1, metrics)
+                    try:
+                        metrics = {
+                            "accuracy": logs.get("accuracy", 0.0),
+                            "loss": logs.get("loss", 1.0),
+                            "val_accuracy": logs.get("val_accuracy", 0.0),
+                            "val_loss": logs.get("val_loss", 1.0),
+                        }
+                        logger.info(f"📊 Progress callback called for epoch {epoch + 1}: {metrics}")
+                        progress_callback(epoch + 1, metrics)
+                        logger.info(f"✅ Progress callback completed for epoch {epoch + 1}")
+                    except Exception as e:
+                        logger.error(f"❌ Error in progress callback: {e}")
+                else:
+                    logger.warning("⚠️ No progress callback provided")
         
         # Add progress callback to callbacks list
         if progress_callback:
             callbacks.append(ProgressCallback())
+            logger.info("✅ Progress callback added to training callbacks")
+        else:
+            logger.warning("⚠️ No progress callback provided - no real-time updates")
         
         history = model.fit(
             train_generator,
@@ -247,34 +262,7 @@ def retrain_model(train_dir: str = "../data/train",
         logger.info(f"📊 Final training accuracy: {final_train_acc:.4f}")
         logger.info(f"📊 Final validation accuracy: {final_val_acc:.4f}")
         
-        # 7. Generate and save confusion matrix
-        try:
-            logger.info("📊 Generating confusion matrix...")
-            val_generator.reset()
-            val_predictions = model.predict(val_generator, verbose=0)
-            val_pred_classes = (val_predictions > 0.5).astype(int).flatten()
-            val_true_classes = val_generator.classes
-            
-            cm = confusion_matrix(val_true_classes, val_pred_classes)
-            
-            plt.figure(figsize=(8, 6))
-            sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
-                       xticklabels=['Malnourished', 'Overnourished'],
-                       yticklabels=['Malnourished', 'Overnourished'])
-            plt.title('Confusion Matrix - Validation Set')
-            plt.xlabel('Predicted')
-            plt.ylabel('Actual')
-            plt.tight_layout()
-            
-            confusion_matrix_path = model_path.replace('.h5', '_confusion_matrix.png')
-            plt.savefig(confusion_matrix_path, dpi=300, bbox_inches='tight')
-            plt.close()
-            logger.info(f"💾 Confusion matrix saved to: {confusion_matrix_path}")
-            
-        except Exception as e:
-            logger.warning(f"Could not generate confusion matrix: {e}")
-        
-        # 8. Generate and save training plots
+        # 7. Generate and save training plots
         try:
             logger.info("📈 Generating training plots...")
             fig, axes = plt.subplots(1, 2, figsize=(12, 5))
@@ -306,7 +294,7 @@ def retrain_model(train_dir: str = "../data/train",
         except Exception as e:
             logger.warning(f"Could not generate training plots: {e}")
         
-        # 9. Generate and save correlation matrix (feature importance visualization)
+        # 8. Generate and save correlation matrix (feature importance visualization)
         try:
             logger.info("🔗 Generating correlation matrix...")
             # Extract features from the last layer before classification
@@ -343,11 +331,11 @@ def retrain_model(train_dir: str = "../data/train",
         except Exception as e:
             logger.warning(f"Could not generate correlation matrix: {e}")
         
-        # 10. Save the retrained model
+        # 9. Save the retrained model
         model.save(model_path)
         logger.info(f"💾 Model saved to: {model_path}")
         
-        # 11. Save training history
+        # 10. Save training history
         training_history = []
         for i in range(len(history.history['accuracy'])):
             training_history.append({
