@@ -13,7 +13,7 @@ import io
 class MalnutritionAPIUser(HttpUser):
     """Load testing user for the malnutrition detection API."""
     
-    wait_time = between(1, 3)  # Wait 1-3 seconds between requests
+    wait_time = between(0.5, 2)  # Faster requests for higher volume
     
     def on_start(self):
         """Initialize user session."""
@@ -29,37 +29,30 @@ class MalnutritionAPIUser(HttpUser):
         img_byte_arr = img_byte_arr.getvalue()
         return img_byte_arr
     
-    @task(3)
+    @task(5)
     def health_check(self):
         """Test health check endpoint."""
         self.client.get("/health")
     
-    @task(2)
+    @task(4)
     def get_status(self):
         """Test model status endpoint."""
         self.client.get("/status")
     
-    @task(1)
+    @task(8)
     def predict_single_image(self):
         """Test single image prediction endpoint."""
-        files = {'file': ('test_image.jpg', self.dummy_image, 'image/jpeg')}
+        files = {'image': ('test_image.jpg', self.dummy_image, 'image/jpeg')}
         self.client.post("/predict/image", files=files)
     
-    @task(1)
-    def predict_batch_images(self):
-        """Test batch image prediction endpoint."""
-        files = [
-            ('files', ('test_image1.jpg', self.dummy_image, 'image/jpeg')),
-            ('files', ('test_image2.jpg', self.dummy_image, 'image/jpeg'))
-        ]
-        self.client.post("/predict/bulk", files=files)
+
     
-    @task(1)
+    @task(3)
     def get_metrics(self):
         """Test performance metrics endpoint."""
         self.client.get("/metrics")
     
-    @task(1)
+    @task(4)
     def upload_data(self):
         """Test data upload endpoint."""
         files = [
@@ -68,7 +61,7 @@ class MalnutritionAPIUser(HttpUser):
         ]
         self.client.post("/upload/data", files=files)
     
-    @task(1)
+    @task(3)
     def trigger_retraining(self):
         """Test model retraining endpoint."""
         self.client.post("/retrain")
@@ -77,7 +70,7 @@ class MalnutritionAPIUser(HttpUser):
 class HighLoadUser(HttpUser):
     """High load testing user for stress testing."""
     
-    wait_time = between(0.1, 0.5)  # Very fast requests
+    wait_time = between(0.05, 0.2)  # Ultra fast requests for maximum load
     
     def on_start(self):
         """Initialize user session."""
@@ -91,22 +84,36 @@ class HighLoadUser(HttpUser):
         img_byte_arr = img_byte_arr.getvalue()
         return img_byte_arr
     
-    @task(5)
+    @task(10)
     def rapid_predictions(self):
         """Rapid fire predictions for stress testing."""
-        files = {'file': ('stress_test.jpg', self.dummy_image, 'image/jpeg')}
+        files = {'image': ('stress_test.jpg', self.dummy_image, 'image/jpeg')}
         self.client.post("/predict/image", files=files)
     
-    @task(2)
+    @task(5)
     def health_check(self):
         """Frequent health checks."""
         self.client.get("/health")
+    
+    @task(2)
+    def upload_data(self):
+        """Test data upload endpoint."""
+        files = [
+            ('files', ('stress_train1.jpg', self.dummy_image, 'image/jpeg')),
+            ('files', ('stress_train2.jpg', self.dummy_image, 'image/jpeg'))
+        ]
+        self.client.post("/upload/data", files=files)
+    
+    @task(1)
+    def trigger_retraining(self):
+        """Test model retraining endpoint."""
+        self.client.post("/retrain")
 
 
 class APIStressTest(HttpUser):
     """Stress testing for API endpoints."""
     
-    wait_time = between(0.5, 2)
+    wait_time = between(0.2, 1)  # Faster stress testing
     
     def on_start(self):
         """Initialize user session."""
@@ -120,7 +127,7 @@ class APIStressTest(HttpUser):
         img_byte_arr = img_byte_arr.getvalue()
         return img_byte_arr
     
-    @task(3)
+    @task(8)
     def mixed_requests(self):
         """Mix of different request types."""
         # Health check
@@ -130,18 +137,24 @@ class APIStressTest(HttpUser):
         self.client.get("/status")
         
         # Prediction
-        files = {'file': ('mixed_test.jpg', self.dummy_image, 'image/jpeg')}
+        files = {'image': ('mixed_test.jpg', self.dummy_image, 'image/jpeg')}
         self.client.post("/predict/image", files=files)
     
-    @task(1)
-    def batch_operations(self):
-        """Test batch operations."""
+    @task(3)
+    def upload_data(self):
+        """Test data upload endpoint."""
         files = [
-            ('files', ('batch1.jpg', self.dummy_image, 'image/jpeg')),
-            ('files', ('batch2.jpg', self.dummy_image, 'image/jpeg')),
-            ('files', ('batch3.jpg', self.dummy_image, 'image/jpeg'))
+            ('files', ('mixed_train1.jpg', self.dummy_image, 'image/jpeg')),
+            ('files', ('mixed_train2.jpg', self.dummy_image, 'image/jpeg'))
         ]
-        self.client.post("/predict/bulk", files=files)
+        self.client.post("/upload/data", files=files)
+    
+    @task(2)
+    def trigger_retraining(self):
+        """Test model retraining endpoint."""
+        self.client.post("/retrain")
+    
+
 
 
 # Custom events for monitoring

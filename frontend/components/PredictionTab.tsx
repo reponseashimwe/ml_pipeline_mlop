@@ -95,7 +95,9 @@ const PredictionTab: React.FC<PredictionTabProps> = ({ onPredictionComplete }) =
 			reader.readAsDataURL(file);
 
 			try {
-				const result = await api.predictImage(file);
+				const formData = new FormData();
+				formData.append('image', file);
+				const result = await api.predictImage(formData);
 				setPredictionResult(result);
 				onPredictionComplete?.(result);
 				toast.success('Prediction completed successfully!');
@@ -133,7 +135,9 @@ const PredictionTab: React.FC<PredictionTabProps> = ({ onPredictionComplete }) =
 			const blob = await response.blob();
 			const file = new File([blob], testFile.name, { type: 'image/jpeg' });
 
-			const result = await api.predictImage(file);
+			const formData = new FormData();
+			formData.append('image', file);
+			const result = await api.predictImage(formData);
 			setPredictionResult(result);
 			onPredictionComplete?.(result);
 			toast.success(`Test prediction completed for ${testFile.name}!`);

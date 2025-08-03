@@ -115,7 +115,9 @@ const ImageUpload: React.FC<ImageUploadProps> = ({ onPrediction, isTrainingData 
 			reader.readAsDataURL(file);
 
 			try {
-				const result = await api.predictImage(file);
+				const formData = new FormData();
+				formData.append('image', file);
+				const result = await api.predictImage(formData);
 				setPredictionResult(result);
 				onPrediction?.(result);
 				toast.success('Prediction completed successfully!');
@@ -153,7 +155,9 @@ const ImageUpload: React.FC<ImageUploadProps> = ({ onPrediction, isTrainingData 
 			const blob = await response.blob();
 			const file = new File([blob], testFile.name, { type: 'image/jpeg' });
 
-			const result = await api.predictImage(file);
+			const formData = new FormData();
+			formData.append('image', file);
+			const result = await api.predictImage(formData);
 			setPredictionResult(result);
 			onPrediction?.(result);
 			toast.success(`Test prediction completed for ${testFile.name}!`);
@@ -201,9 +205,9 @@ const ImageUpload: React.FC<ImageUploadProps> = ({ onPrediction, isTrainingData 
 						Upload a single image to get instant malnutrition prediction results.
 					</p>
 
-					<div className='grid grid-cols-1 lg:grid-cols-3 gap-4'>
+					<div className='grid grid-cols-1 md:grid-cols-4 lg:grid-cols-6 gap-4'>
 						{/* Left Column - Drag & Drop Area */}
-						<div className='lg:col-span-2'>
+						<div className='md:col-span-3 lg:col-span-5'>
 							<div
 								{...getRootProps()}
 								className={`border-2 border-dashed rounded-lg p-4 text-center cursor-pointer transition-colors h-32 flex items-center justify-center ${
@@ -266,16 +270,24 @@ const ImageUpload: React.FC<ImageUploadProps> = ({ onPrediction, isTrainingData 
 							<h4 className='font-semibold mb-2 text-sm'>Prediction Result:</h4>
 							<div className='grid grid-cols-2 gap-3 text-sm'>
 								<div>
-									<strong>Class:</strong> {predictionResult.predicted_class}
+									<strong>Class:</strong> {predictionResult.class}
 								</div>
 								<div>
 									<strong>Confidence:</strong> {(predictionResult.confidence * 100).toFixed(2)}%
 								</div>
 								<div className='col-span-2'>
-									<strong>Interpretation:</strong> {predictionResult.interpretation}
-								</div>
-								<div className='col-span-2'>
-									<strong>Recommendation:</strong> {predictionResult.recommendation}
+									<strong>Probabilities:</strong>
+									<div className='mt-1 space-y-1'>
+										<div>
+											Malnourished:{' '}
+											{(predictionResult.probabilities.malnourished * 100).toFixed(1)}%
+										</div>
+										<div>
+											Overnourished:{' '}
+											{(predictionResult.probabilities.overnourished * 100).toFixed(1)}%
+										</div>
+										<div>Normal: {(predictionResult.probabilities.normal * 100).toFixed(1)}%</div>
+									</div>
 								</div>
 							</div>
 						</div>

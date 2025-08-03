@@ -5,18 +5,23 @@ Handles incremental training with new uploaded data.
 """
 
 import os
+import shutil
+import logging
 import numpy as np
 import tensorflow as tf
 from tensorflow import keras
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend to prevent GUI crashes in threads
+import matplotlib.pyplot as plt
+import seaborn as sns
+from PIL import Image
+from typing import Dict, Tuple, Optional, List
+import json
 from tensorflow.keras import layers, models, optimizers, regularizers
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from tensorflow.keras.applications import MobileNetV2
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCheckpoint
-import logging
 from datetime import datetime
-from typing import Dict, Tuple
-import matplotlib.pyplot as plt
-import seaborn as sns
 from sklearn.metrics import confusion_matrix
 
 # Configure logging
@@ -220,17 +225,27 @@ def retrain_model(train_dir: str = "../data/train",
         class ProgressCallback(tf.keras.callbacks.Callback):
             def on_epoch_end(self, epoch, logs=None):
                 if progress_callback:
-                    metrics = {
-                        "accuracy": logs.get("accuracy", 0.0),
-                        "loss": logs.get("loss", 1.0),
-                        "val_accuracy": logs.get("val_accuracy", 0.0),
-                        "val_loss": logs.get("val_loss", 1.0),
-                    }
-                    progress_callback(epoch + 1, metrics)
+                    try:
+                        metrics = {
+                            "accuracy": logs.get("accuracy", 0.0),
+                            "loss": logs.get("loss", 1.0),
+                            "val_accuracy": logs.get("val_accuracy", 0.0),
+                            "val_loss": logs.get("val_loss", 1.0),
+                        }
+                        logger.info(f"📊 Progress callback called for epoch {epoch + 1}: {metrics}")
+                        progress_callback(epoch + 1, metrics)
+                        logger.info(f"✅ Progress callback completed for epoch {epoch + 1}")
+                    except Exception as e:
+                        logger.error(f"❌ Error in progress callback: {e}")
+                else:
+                    logger.warning("⚠️ No progress callback provided")
         
         # Add progress callback to callbacks list
         if progress_callback:
             callbacks.append(ProgressCallback())
+            logger.info("✅ Progress callback added to training callbacks")
+        else:
+            logger.warning("⚠️ No progress callback provided - no real-time updates")
         
         history = model.fit(
             train_generator,
@@ -247,125 +262,10 @@ def retrain_model(train_dir: str = "../data/train",
         logger.info(f"📊 Final training accuracy: {final_train_acc:.4f}")
         logger.info(f"📊 Final validation accuracy: {final_val_acc:.4f}")
         
-        # 7. Generate and save confusion matrix
-        try:
-            logger.info("📊 Generating confusion matrix...")
-            val_generator.reset()
-            val_predictions = model.predict(val_generator, verbose=0)
-            val_pred_classes = (val_predictions > 0.5).astype(int).flatten()
-            val_true_classes = val_generator.classes
-            
-            cm = confusion_matrix(val_true_classes, val_pred_classes)
-            
-            plt.figure(figsize=(8, 6))
-            sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
-                       xticklabels=['Malnourished', 'Overnourished'],
-                       yticklabels=['Malnourished', 'Overnourished'])
-            plt.title('Confusion Matrix - Validation Set')
-            plt.xlabel('Predicted')
-            plt.ylabel('Actual')
-            plt.tight_layout()
-            
-            confusion_matrix_path = model_path.replace('.h5', '_confusion_matrix.png')
-            plt.savefig(confusion_matrix_path, dpi=300, bbox_inches='tight')
-            plt.close()
-            logger.info(f"💾 Confusion matrix saved to: {confusion_matrix_path}")
-            
-        except Exception as e:
-            logger.warning(f"Could not generate confusion matrix: {e}")
-        
-        # 8. Generate and save training plots
-        try:
-            logger.info("📈 Generating training plots...")
-            fig, axes = plt.subplots(1, 2, figsize=(12, 5))
-            
-            # Training history
-            axes[0].plot(history.history['accuracy'], label='Training Accuracy', color='blue')
-            axes[0].plot(history.history['val_accuracy'], label='Validation Accuracy', color='red')
-            axes[0].set_title('Model Accuracy')
-            axes[0].set_xlabel('Epoch')
-            axes[0].set_ylabel('Accuracy')
-            axes[0].legend()
-            axes[0].grid(True, alpha=0.3)
-            
-            axes[1].plot(history.history['loss'], label='Training Loss', color='blue')
-            axes[1].plot(history.history['val_loss'], label='Validation Loss', color='red')
-            axes[1].set_title('Model Loss')
-            axes[1].set_xlabel('Epoch')
-            axes[1].set_ylabel('Loss')
-            axes[1].legend()
-            axes[1].grid(True, alpha=0.3)
-            
-            plt.tight_layout()
-            
-            training_plots_path = model_path.replace('.h5', '_training_plots.png')
-            plt.savefig(training_plots_path, dpi=300, bbox_inches='tight')
-            plt.close()
-            logger.info(f"💾 Training plots saved to: {training_plots_path}")
-            
-        except Exception as e:
-            logger.warning(f"Could not generate training plots: {e}")
-        
-        # 9. Generate and save correlation matrix (feature importance visualization)
-        try:
-            logger.info("🔗 Generating correlation matrix...")
-            # Extract features from the last layer before classification
-            feature_extractor = keras.Model(inputs=model.input, outputs=model.layers[-2].output)
-            
-            # Get features for a sample of validation data
-            val_generator.reset()
-            sample_features = []
-            sample_labels = []
-            
-            for i in range(min(50, len(val_generator))):
-                batch_x, batch_y = val_generator.next()
-                features = feature_extractor.predict(batch_x, verbose=0)
-                sample_features.extend(features)
-                sample_labels.extend(batch_y)
-            
-            if len(sample_features) > 10:
-                sample_features = np.array(sample_features)
-                
-                # Calculate correlation matrix
-                corr_matrix = np.corrcoef(sample_features.T)
-                
-                plt.figure(figsize=(10, 8))
-                sns.heatmap(corr_matrix, cmap='coolwarm', center=0, 
-                           square=True, cbar_kws={"shrink": .8})
-                plt.title('Feature Correlation Matrix')
-                plt.tight_layout()
-                
-                correlation_matrix_path = model_path.replace('.h5', '_correlation_matrix.png')
-                plt.savefig(correlation_matrix_path, dpi=300, bbox_inches='tight')
-                plt.close()
-                logger.info(f"💾 Correlation matrix saved to: {correlation_matrix_path}")
-            
-        except Exception as e:
-            logger.warning(f"Could not generate correlation matrix: {e}")
-        
-        # 10. Save the retrained model
+        # 7. Save the retrained model (no extra files - all data goes to database)
         model.save(model_path)
         logger.info(f"💾 Model saved to: {model_path}")
-        
-        # 11. Save training history
-        training_history = []
-        for i in range(len(history.history['accuracy'])):
-            training_history.append({
-                "epoch": i + 1,
-                "accuracy": float(history.history['accuracy'][i]),
-                "loss": float(history.history['loss'][i]),
-                "val_accuracy": float(history.history['val_accuracy'][i]),
-                "val_loss": float(history.history['val_loss'][i])
-            })
-        
-        history_path = model_path.replace('.h5', '_history.json')
-        try:
-            import json
-            with open(history_path, 'w') as f:
-                json.dump(training_history, f, indent=2)
-            logger.info(f"💾 Training history saved to: {history_path}")
-        except Exception as e:
-            logger.warning(f"Could not save training history: {e}")
+        logger.info("📊 Training plots and history stored in database, no extra files needed")
         
         # 12. Return results
         results = {
@@ -380,6 +280,41 @@ def retrain_model(train_dir: str = "../data/train",
             "model_path": model_path,
             "timestamp": datetime.now().isoformat()
         }
+        
+        # Calculate REAL metrics using validation data
+        try:
+            from database import get_database
+            from sklearn.metrics import precision_score, recall_score, f1_score
+            db = get_database()
+            
+            # Get real predictions on validation data
+            val_generator.reset()
+            predictions = model.predict(val_generator, verbose=0)
+            predicted_classes = (predictions > 0.5).astype(int).flatten()
+            true_labels = val_generator.classes
+            
+            # Calculate real metrics
+            precision = precision_score(true_labels, predicted_classes)
+            recall = recall_score(true_labels, predicted_classes)
+            f1 = f1_score(true_labels, predicted_classes)
+            
+            logger.info(f"📊 Real Metrics - Precision: {precision:.4f}, Recall: {recall:.4f}, F1: {f1:.4f}")
+            
+            # Save to database
+            model_version = f"retrained_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            db.save_model_performance(
+                model_version=model_version,
+                accuracy=float(final_val_acc),
+                precision=float(precision),
+                recall=float(recall),
+                f1=float(f1),
+                test_samples=len(true_labels)
+            )
+            
+            logger.info(f"💾 Saved REAL model performance to database: {model_version}")
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Could not save model performance to database: {e}")
         
         logger.info("✅ Retraining completed successfully!")
         return results
