@@ -10,10 +10,10 @@
 
 ## 📋 Table of Contents
 
+-   [🚀 Live Demo](#-live-demo)
 -   [🎯 Project Overview](#-project-overview)
 -   [🏥 Use Case & Impact](#-use-case--impact)
 -   [📊 Dataset Information](#-dataset-information)
--   [🚀 Live Demo](#-live-demo)
 -   [🏗️ Architecture](#️-architecture)
 -   [⚙️ Features](#️-features)
 -   [📦 Installation](#-installation)
@@ -24,6 +24,44 @@
 -   [📚 API Documentation](#-api-documentation)
 -   [🤝 Contributing](#-contributing)
 -   [📄 License](#-license)
+
+## 🚀 Live Demo
+
+### **🎥 Demo Videos**
+
+-   **Live Demo Walkthrough**: [![Demo Video](https://img.shields.io/badge/Watch-Demo%20Video-red?style=for-the-badge&logo=youtube)](https://youtu.be/zo2agS-xfKM)
+-   **Model Retraining Process**: [![Retraining Demo](https://img.shields.io/badge/Watch-Retraining%20Demo-red?style=for-the-badge&logo=youtube)](https://youtu.be/xiOmyVTxfKI) (Performed locally due to Render's memory limitations)
+
+### **🌐 Production Deployment**
+
+-   **Frontend**: [https://ml-pipeline-mlop.vercel.app/](https://ml-pipeline-mlop.vercel.app/)
+-   **Backend API**: [https://ml-pipeline-mlop.onrender.com/](https://ml-pipeline-mlop.onrender.com/)
+-   **DOvumentation**: [https://ml-pipeline-mlop.onrender.com/docs](https://ml-pipeline-mlop.onrender.com/docs)
+-   **Status**: ✅ **LIVE & OPERATIONAL**
+
+### **⚠️ Important Notes**
+
+-   **Retraining Recommendation**: Due to memory constraints on Render's free tier (512MB limit), it's recommended to perform model retraining locally rather than on the deployed instance.
+-   **Local Retraining Steps**:
+    1. Clone the repository
+    2. Follow the installation steps below
+    3. Use the local API endpoint for retraining
+    4. Upload the retrained model to production if needed
+
+### **🎯 Demo Features**
+
+-   **Single Image Prediction**: Upload and get instant results
+-   **Test Images**: Pre-loaded sample images for quick testing
+-   **Real-time Processing**: Immediate classification results
+-   **Confidence Scores**: Detailed prediction confidence
+-   **Visual Analytics**: Model performance and data insights
+
+### **📱 How to Use the Demo**
+
+1. Visit [https://ml-pipeline-mlop.vercel.app/](https://ml-pipeline-mlop.vercel.app/)
+2. Upload an image or use test images
+3. Get instant malnutrition classification
+4. View confidence scores and recommendations
 
 ## 🎯 Project Overview
 
@@ -95,29 +133,6 @@ data/
 -   **Classes**: 3 (Malnourished, Overnourished, Normal)
 -   **Model Input**: 128x128 pixels (MobileNetV2 optimized)
 -   **Augmentation**: Applied during training for robustness
-
-## 🚀 Live Demo
-
-### **🌐 Production Deployment**
-
--   **Frontend**: [https://ml-pipeline-mlop.vercel.app/](https://ml-pipeline-mlop.vercel.app/)
--   **Backend API**: Deployed on Render
--   **Status**: ✅ **LIVE & OPERATIONAL**
-
-### **🎯 Demo Features**
-
--   **Single Image Prediction**: Upload and get instant results
--   **Test Images**: Pre-loaded sample images for quick testing
--   **Real-time Processing**: Immediate classification results
--   **Confidence Scores**: Detailed prediction confidence
--   **Visual Analytics**: Model performance and data insights
-
-### **📱 How to Use the Demo**
-
-1. Visit [https://ml-pipeline-mlop.vercel.app/](https://ml-pipeline-mlop.vercel.app/)
-2. Upload an image or use test images
-3. Get instant malnutrition classification
-4. View confidence scores and recommendations
 
 ## 🏗️ Architecture
 

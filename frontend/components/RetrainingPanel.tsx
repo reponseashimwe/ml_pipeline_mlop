@@ -201,7 +201,7 @@ const RetrainingPanel: React.FC = () => {
 					clearInterval(pollInterval);
 				}
 			}
-		}, 7000); // Poll every 3 seconds
+		}, 3000); // Poll every 3 seconds
 
 		// Cleanup on unmount
 		return () => clearInterval(pollInterval);
