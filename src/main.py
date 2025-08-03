@@ -317,7 +317,11 @@ async def upload_labeled_training_data(files: List[UploadFile] = File(...), labe
                 file_size = os.path.getsize(file_path)
                 
                 # Save to database for retraining purposes
-                db_record_id = db.save_uploaded_data(
+                current_db = get_database()
+                if current_db is None:
+                    raise Exception("Database not available")
+                
+                db_record_id = current_db.save_uploaded_data(
                     filename=safe_filename,
                     original_name=file.filename,
                     file_path=file_path,
@@ -418,8 +422,16 @@ def run_training_in_thread(job_id: str):
         training_jobs[job_id]["status"] = "training"
         logger.info(f"📊 Job {job_id} status updated to training")
         
+        # Get database instance (lazy load if needed)
+        current_db = get_database()
+        if current_db is None:
+            training_jobs[job_id]["status"] = "failed"
+            training_jobs[job_id]["error"] = "Database not available"
+            logger.error("Database not available for training")
+            return
+        
         # Start database training session
-        db.start_training_session(job_id, 20)  # 20 epochs default
+        current_db.start_training_session(job_id, 20)  # 20 epochs default
         
         # Import our clean retraining module
         from retrain import retrain_model, merge_uploaded_data
@@ -443,7 +455,7 @@ def run_training_in_thread(job_id: str):
                 update_training_progress(job_id, epoch, metrics)
                 
                 # Save training metrics to database
-                db.save_training_metrics(
+                current_db.save_training_metrics(
                     session_id=job_id,
                     epoch=epoch,
                     accuracy=metrics.get('accuracy', 0.0),
@@ -469,7 +481,7 @@ def run_training_in_thread(job_id: str):
             
             # Complete database training session
             metrics = result.get('metrics', {})
-            db.complete_training_session(
+            current_db.complete_training_session(
                 session_id=job_id,
                 final_accuracy=metrics.get('final_accuracy', 0.0),
                 final_loss=metrics.get('final_loss', 0.0),
@@ -478,10 +490,10 @@ def run_training_in_thread(job_id: str):
             
             # Mark uploaded data as used for training
             try:
-                uploaded_data = db.get_uploaded_data_for_training()
+                uploaded_data = current_db.get_uploaded_data_for_training()
                 if uploaded_data:
                     record_ids = [data['id'] for data in uploaded_data]
-                    db.mark_data_as_used(record_ids)
+                    current_db.mark_data_as_used(record_ids)
                     logger.info(f"📊 Marked {len(record_ids)} uploaded files as used for training")
             except Exception as e:
                 logger.error(f"❌ Error updating database records: {e}")
@@ -507,6 +519,7 @@ def run_training_in_thread(job_id: str):
             # 4. Reload the updated model
             global predictor
             try:
+                from prediction import create_predictor
                 predictor = create_predictor("../models/malnutrition_model.h5", confidence_threshold=0.70)
                 model_status["last_updated"] = datetime.now().isoformat()
                 model_status["is_loaded"] = True
@@ -677,7 +690,15 @@ async def get_database_stats():
         Database statistics and counts
     """
     try:
-        stats = db.get_database_stats()
+        current_db = get_database()
+        if current_db is None:
+            return {
+                "success": False,
+                "error": "Database not available",
+                "timestamp": datetime.now().isoformat()
+            }
+        
+        stats = current_db.get_database_stats()
         return {
             "success": True,
             "database_stats": stats,
@@ -1149,4 +1170,4 @@ async def delete_uploaded_image(class_name: str, filename: str):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True) 
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000))) 
