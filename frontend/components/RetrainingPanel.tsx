@@ -31,6 +31,7 @@ const RetrainingPanel: React.FC = () => {
 	const [trainingHistory, setTrainingHistory] = useState<TrainingHistoryPoint[]>([]);
 	const [logs, setLogs] = useState<string[]>([]);
 	const [isPolling, setIsPolling] = useState(false);
+	const lastDisplayedEpochRef = useRef<number>(-1);
 	const logsEndRef = useRef<HTMLDivElement>(null);
 
 	// Load existing training history on mount
@@ -63,6 +64,7 @@ const RetrainingPanel: React.FC = () => {
 		setStatus('starting');
 		setLogs([]);
 		setTrainingProgress(null);
+		lastDisplayedEpochRef.current = -1;
 
 		try {
 			setLogs((prev) => [...prev, '🚀 Initiating model retraining...']);
@@ -141,40 +143,46 @@ const RetrainingPanel: React.FC = () => {
 						}
 					});
 
-					// Enhanced terminal-like logging
-					const epochLog = `📊 Epoch ${progress.epoch}/${progress.total_epochs}`;
-					const accuracyLog = `   Accuracy: ${(progress.accuracy * 100).toFixed(2)}%`;
-					const lossLog = `   Loss: ${progress.loss.toFixed(4)}`;
-					const valAccuracyLog = `   Val Accuracy: ${(progress.val_accuracy * 100).toFixed(2)}%`;
-					const valLossLog = `   Val Loss: ${progress.val_loss.toFixed(4)}`;
+					// Check if this is a new epoch (not already displayed)
+					const isNewEpoch = progress.epoch !== lastDisplayedEpochRef.current;
 
-					// Check if validation accuracy improved
-					const prevEpoch = trainingHistory.find((p) => p.epoch === progress.epoch - 1);
-					let improvementLog = '';
-					if (prevEpoch) {
-						if (progress.val_accuracy > prevEpoch.val_accuracy) {
-							improvementLog = `   ✅ Val accuracy improved from ${(prevEpoch.val_accuracy * 100).toFixed(
-								2
-							)}%`;
-						} else if (progress.val_accuracy < prevEpoch.val_accuracy) {
-							improvementLog = `   ⚠️ Val accuracy decreased from ${(
-								prevEpoch.val_accuracy * 100
-							).toFixed(2)}%`;
-						} else {
-							improvementLog = `   ➡️ Val accuracy unchanged`;
+					if (isNewEpoch) {
+						lastDisplayedEpochRef.current = progress.epoch;
+						// Enhanced terminal-like logging - only for new epochs
+						const epochLog = `📊 Epoch ${progress.epoch}/${progress.total_epochs}`;
+						const accuracyLog = `   Accuracy: ${(progress.accuracy * 100).toFixed(2)}%`;
+						const lossLog = `   Loss: ${progress.loss.toFixed(4)}`;
+						const valAccuracyLog = `   Val Accuracy: ${(progress.val_accuracy * 100).toFixed(2)}%`;
+						const valLossLog = `   Val Loss: ${progress.val_loss.toFixed(4)}`;
+
+						// Check if validation accuracy improved
+						const prevEpoch = trainingHistory.find((p) => p.epoch === progress.epoch - 1);
+						let improvementLog = '';
+						if (prevEpoch) {
+							if (progress.val_accuracy > prevEpoch.val_accuracy) {
+								improvementLog = `   ✅ Val accuracy improved from ${(
+									prevEpoch.val_accuracy * 100
+								).toFixed(2)}%`;
+							} else if (progress.val_accuracy < prevEpoch.val_accuracy) {
+								improvementLog = `   ⚠️ Val accuracy decreased from ${(
+									prevEpoch.val_accuracy * 100
+								).toFixed(2)}%`;
+							} else {
+								improvementLog = `   ➡️ Val accuracy unchanged`;
+							}
 						}
-					}
 
-					setLogs((prev) => [
-						...prev,
-						epochLog,
-						accuracyLog,
-						lossLog,
-						valAccuracyLog,
-						valLossLog,
-						...(improvementLog ? [improvementLog] : []),
-						'',
-					]);
+						setLogs((prev) => [
+							...prev,
+							epochLog,
+							accuracyLog,
+							lossLog,
+							valAccuracyLog,
+							valLossLog,
+							...(improvementLog ? [improvementLog] : []),
+							'',
+						]);
+					}
 				} else {
 					console.log(`⚠️ Unknown status: ${progress.status}`);
 				}
@@ -193,7 +201,7 @@ const RetrainingPanel: React.FC = () => {
 					clearInterval(pollInterval);
 				}
 			}
-		}, 3000); // Poll every 3 seconds
+		}, 7000); // Poll every 3 seconds
 
 		// Cleanup on unmount
 		return () => clearInterval(pollInterval);

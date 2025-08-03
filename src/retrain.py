@@ -142,7 +142,8 @@ def create_data_generators(train_dir: str, batch_size: int = 8) -> Tuple:
 def retrain_model(train_dir: str = "../data/train", 
                  model_path: str = "../models/malnutrition_model.h5",
                  epochs: int = 30,  # Increased for better performance
-                 progress_callback=None) -> Dict[str, any]:
+                 progress_callback=None,
+                 show_all_epochs: bool = False) -> Dict[str, any]:
     """
     Retrain the malnutrition detection model with new data.
     
@@ -220,10 +221,26 @@ def retrain_model(train_dir: str = "../data/train",
         
         # 5. Train the model with progress tracking
         logger.info(f"🔄 Training model for {epochs} epochs...")
+        logger.info(f"📊 Training data counts: {class_counts}")
+        logger.info(f"📊 Train generator steps per epoch: {len(train_generator)}")
+        logger.info(f"📊 Validation generator steps per epoch: {len(val_generator)}")
+        logger.info(f"📊 Model input shape: {model.input_shape}")
+        logger.info(f"📊 Model output shape: {model.output_shape}")
+        logger.info(f"📊 Callbacks: {len(callbacks)} callbacks configured")
         
-        # Custom callback for progress tracking
+        # Custom callback for progress tracking - ensures EVERY epoch is logged
         class ProgressCallback(tf.keras.callbacks.Callback):
+            def __init__(self):
+                super().__init__()
+                self.epoch_count = 0
+            
+            def on_epoch_begin(self, epoch, logs=None):
+                """Called at the beginning of each epoch"""
+                self.epoch_count = epoch + 1
+                logger.info(f"🔄 Starting epoch {self.epoch_count}")
+            
             def on_epoch_end(self, epoch, logs=None):
+                """Called at the end of each epoch - ALWAYS called for every epoch"""
                 if progress_callback:
                     try:
                         metrics = {
@@ -239,14 +256,18 @@ def retrain_model(train_dir: str = "../data/train",
                         logger.error(f"❌ Error in progress callback: {e}")
                 else:
                     logger.warning("⚠️ No progress callback provided")
+            
+            def on_train_end(self, logs=None):
+                """Called when training ends (including early stopping)"""
+                logger.info(f"🏁 Training ended after {self.epoch_count} epochs")
+                if hasattr(self.model, 'stopped_epoch') and self.model.stopped_epoch:
+                    logger.info(f"⏹️ Early stopping triggered at epoch {self.model.stopped_epoch}")
         
-        # Add progress callback to callbacks list
-        if progress_callback:
-            callbacks.append(ProgressCallback())
-            logger.info("✅ Progress callback added to training callbacks")
-        else:
-            logger.warning("⚠️ No progress callback provided - no real-time updates")
+        # Add progress callback to callbacks list - ALWAYS add it
+        callbacks.append(ProgressCallback())
+        logger.info("✅ Progress callback added to training callbacks")
         
+        logger.info("🚀 Starting model.fit()...")
         history = model.fit(
             train_generator,
             epochs=epochs,
@@ -254,6 +275,7 @@ def retrain_model(train_dir: str = "../data/train",
             callbacks=callbacks,
             verbose=1
         )
+        logger.info(f"✅ model.fit() completed. History length: {len(history.history.get('accuracy', []))}")
         
         # 6. Evaluate final performance
         final_train_acc = history.history['accuracy'][-1]

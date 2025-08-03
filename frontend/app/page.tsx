@@ -34,9 +34,11 @@ export default function Home() {
 								End-to-end machine learning system for child malnutrition detection
 							</p>
 						</div>
-						<div className='text-right'>
+						<div className='text-right flex flex-col items-end'>
 							<div className='text-sm text-gray-500'>MLOps Pipeline</div>
-							<div className='text-xs text-gray-400'>Production Ready</div>
+							<div className='text-xs text-gray-400 flex items-center gap-2'>
+								<span className='text-green-500 bg-green-100 px-2 py-1 rounded-md'>Production</span>
+							</div>
 						</div>
 					</div>
 				</div>
