@@ -19,6 +19,7 @@ export default function Home() {
 		{ id: 'retrain', name: '🔄 Retrain Model', icon: '🔄' },
 		{ id: 'visualizations', name: '📊 Visualizations', icon: '📊' },
 		{ id: 'status', name: '📈 Model Status', icon: '📈' },
+		{ id: 'performance', name: '⚡ Performance', icon: '⚡' },
 	];
 
 	return (
@@ -79,6 +80,40 @@ export default function Home() {
 				{activeTab === 'visualizations' && <DataVisualization />}
 
 				{activeTab === 'status' && <ModelStatus />}
+
+				{activeTab === 'performance' && (
+					<div className='space-y-6'>
+						<div className='bg-white rounded-lg shadow p-6'>
+							<h2 className='text-xl font-semibold text-gray-900 mb-4'>⚡ Performance Testing</h2>
+							<div className='space-y-4'>
+								<div className='bg-blue-50 border border-blue-200 rounded-lg p-4'>
+									<h3 className='text-lg font-medium text-blue-900 mb-2'>Load Testing Results</h3>
+									<p className='text-blue-700 mb-4'>
+										View the latest performance report from Locust load testing.
+									</p>
+									<a
+										href={`${process.env.NEXT_PUBLIC_API_URL}/performance-report`}
+										target='_blank'
+										rel='noopener noreferrer'
+										className='inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500'
+									>
+										📊 View Performance Report
+									</a>
+								</div>
+								<div className='bg-green-50 border border-green-200 rounded-lg p-4'>
+									<h3 className='text-lg font-medium text-green-900 mb-2'>Run Load Test</h3>
+									<p className='text-green-700 mb-4'>
+										Execute a new load test to generate fresh performance metrics.
+									</p>
+									<code className='block bg-gray-100 p-3 rounded text-sm'>
+										cd tests && locust -f locustfile.py --host=http://localhost:8000 --users=10
+										--spawn-rate=2 --run-time=30s --headless --html=performance_report.html
+									</code>
+								</div>
+							</div>
+						</div>
+					</div>
+				)}
 			</main>
 		</div>
 	);

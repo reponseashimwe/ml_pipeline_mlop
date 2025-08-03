@@ -13,7 +13,7 @@ import io
 class MalnutritionAPIUser(HttpUser):
     """Load testing user for the malnutrition detection API."""
     
-    wait_time = between(1, 3)  # Wait 1-3 seconds between requests
+    wait_time = between(0.5, 2)  # Faster requests for higher volume
     
     def on_start(self):
         """Initialize user session."""
@@ -42,17 +42,10 @@ class MalnutritionAPIUser(HttpUser):
     @task(1)
     def predict_single_image(self):
         """Test single image prediction endpoint."""
-        files = {'file': ('test_image.jpg', self.dummy_image, 'image/jpeg')}
+        files = {'image': ('test_image.jpg', self.dummy_image, 'image/jpeg')}
         self.client.post("/predict/image", files=files)
     
-    @task(1)
-    def predict_batch_images(self):
-        """Test batch image prediction endpoint."""
-        files = [
-            ('files', ('test_image1.jpg', self.dummy_image, 'image/jpeg')),
-            ('files', ('test_image2.jpg', self.dummy_image, 'image/jpeg'))
-        ]
-        self.client.post("/predict/bulk", files=files)
+
     
     @task(1)
     def get_metrics(self):
@@ -77,7 +70,7 @@ class MalnutritionAPIUser(HttpUser):
 class HighLoadUser(HttpUser):
     """High load testing user for stress testing."""
     
-    wait_time = between(0.1, 0.5)  # Very fast requests
+    wait_time = between(0.05, 0.2)  # Ultra fast requests for maximum load
     
     def on_start(self):
         """Initialize user session."""
@@ -94,7 +87,7 @@ class HighLoadUser(HttpUser):
     @task(5)
     def rapid_predictions(self):
         """Rapid fire predictions for stress testing."""
-        files = {'file': ('stress_test.jpg', self.dummy_image, 'image/jpeg')}
+        files = {'image': ('stress_test.jpg', self.dummy_image, 'image/jpeg')}
         self.client.post("/predict/image", files=files)
     
     @task(2)
@@ -106,7 +99,7 @@ class HighLoadUser(HttpUser):
 class APIStressTest(HttpUser):
     """Stress testing for API endpoints."""
     
-    wait_time = between(0.5, 2)
+    wait_time = between(0.2, 1)  # Faster stress testing
     
     def on_start(self):
         """Initialize user session."""
@@ -130,18 +123,10 @@ class APIStressTest(HttpUser):
         self.client.get("/status")
         
         # Prediction
-        files = {'file': ('mixed_test.jpg', self.dummy_image, 'image/jpeg')}
+        files = {'image': ('mixed_test.jpg', self.dummy_image, 'image/jpeg')}
         self.client.post("/predict/image", files=files)
     
-    @task(1)
-    def batch_operations(self):
-        """Test batch operations."""
-        files = [
-            ('files', ('batch1.jpg', self.dummy_image, 'image/jpeg')),
-            ('files', ('batch2.jpg', self.dummy_image, 'image/jpeg')),
-            ('files', ('batch3.jpg', self.dummy_image, 'image/jpeg'))
-        ]
-        self.client.post("/predict/bulk", files=files)
+
 
 
 # Custom events for monitoring

@@ -16,7 +16,7 @@ import time # Added for uptime calculation
 import threading  # Add threading for non-blocking training
 
 from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks, Form
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -138,7 +138,6 @@ async def root():
         "model_loaded": predictor is not None,
         "endpoints": {
             "predict_single": "/predict/image",
-            "predict_batch": "/predict/bulk",
             "status": "/status",
             "docs": "/docs"
         }
@@ -169,45 +168,7 @@ async def predict_image(image: UploadFile = File(...)):
         logger.error(f"Prediction error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Prediction failed: {str(e)}")
 
-@app.post("/predict/bulk", response_model=BatchPredictionResponse)
-async def predict_batch_images(files: List[UploadFile] = File(...)):
-    """
-    Predict malnutrition status for multiple uploaded images.
-    
-    Args:
-        files: List of uploaded image files
-        
-    Returns:
-        Batch prediction results with statistics
-    """
-    try:
-        # Validate files
-        for file in files:
-            if not file.content_type.startswith('image/'):
-                raise HTTPException(status_code=400, detail=f"File {file.filename} must be an image")
-        
-        # Save uploaded files temporarily
-        temp_paths = []
-        for file in files:
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as temp_file:
-                shutil.copyfileobj(file.file, temp_file)
-                temp_paths.append(temp_file.name)
-        
-        # Make batch prediction
-        result = predictor.predict_batch_images(temp_paths)
-        
-        # Clean up temporary files
-        for temp_path in temp_paths:
-            os.unlink(temp_path)
-        
-        if not result['success']:
-            raise HTTPException(status_code=500, detail=result['error'])
-        
-        return BatchPredictionResponse(**result)
-        
-    except Exception as e:
-        logger.error(f"Error in batch prediction: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/upload/data")
 async def upload_training_data(files: List[UploadFile] = File(...)):
@@ -702,6 +663,30 @@ async def health_check():
         "active_training_jobs": len([job for job in training_jobs.values() if job["status"] in ["starting", "training"]])
     }
 
+@app.get("/performance-report")
+async def get_performance_report():
+    """Get the latest performance report from Locust testing."""
+    try:
+        report_path = "../tests/performance_report.html"
+        if os.path.exists(report_path):
+            with open(report_path, 'r') as f:
+                html_content = f.read()
+            return HTMLResponse(content=html_content, status_code=200)
+        else:
+            return HTMLResponse(content="""
+                <html>
+                <head><title>Performance Report</title></head>
+                <body>
+                    <h1>Performance Report Not Available</h1>
+                    <p>No performance report found. Run Locust load testing first.</p>
+                    <p><a href="/">Back to API</a></p>
+                </body>
+                </html>
+            """, status_code=404)
+    except Exception as e:
+        logger.error(f"Error reading performance report: {e}")
+        return HTMLResponse(content=f"Error reading report: {str(e)}", status_code=500)
+
 @app.get("/api/test-images/{filename}")
 async def get_test_image(filename: str):
     """
@@ -868,10 +853,10 @@ async def get_visualization_data():
                 # Generate based on model architecture analysis if model exists
                 if os.path.exists(model_path):
                     feature_importance = [
-                        {"feature": "Facial Features", "importance": 0.35, "color": "#3B82F6"},
-                        {"feature": "Color Analysis", "importance": 0.28, "color": "#10B981"},
-                        {"feature": "Texture Patterns", "importance": 0.22, "color": "#8B5CF6"},
-                        {"feature": "Shape Analysis", "importance": 0.15, "color": "#F59E0B"},
+                        {"feature": "Facial Features", "importance": 0.35, "color": "#4338CA"},
+                        {"feature": "Color Analysis", "importance": 0.28, "color": "#5B21B6"},
+                        {"feature": "Texture Patterns", "importance": 0.22, "color": "#7C3AED"},
+                        {"feature": "Shape Analysis", "importance": 0.15, "color": "#8B5CF6"},
                     ]
                 else:
                     feature_importance = []
