@@ -52,7 +52,7 @@ class MalnutritionAPIUser(HttpUser):
         """Test performance metrics endpoint."""
         self.client.get("/metrics")
     
-    @task(2)
+    @task(4)
     def upload_data(self):
         """Test data upload endpoint."""
         files = [
@@ -61,7 +61,7 @@ class MalnutritionAPIUser(HttpUser):
         ]
         self.client.post("/upload/data", files=files)
     
-    @task(2)
+    @task(3)
     def trigger_retraining(self):
         """Test model retraining endpoint."""
         self.client.post("/retrain")
@@ -94,6 +94,20 @@ class HighLoadUser(HttpUser):
     def health_check(self):
         """Frequent health checks."""
         self.client.get("/health")
+    
+    @task(2)
+    def upload_data(self):
+        """Test data upload endpoint."""
+        files = [
+            ('files', ('stress_train1.jpg', self.dummy_image, 'image/jpeg')),
+            ('files', ('stress_train2.jpg', self.dummy_image, 'image/jpeg'))
+        ]
+        self.client.post("/upload/data", files=files)
+    
+    @task(1)
+    def trigger_retraining(self):
+        """Test model retraining endpoint."""
+        self.client.post("/retrain")
 
 
 class APIStressTest(HttpUser):
@@ -125,6 +139,20 @@ class APIStressTest(HttpUser):
         # Prediction
         files = {'image': ('mixed_test.jpg', self.dummy_image, 'image/jpeg')}
         self.client.post("/predict/image", files=files)
+    
+    @task(3)
+    def upload_data(self):
+        """Test data upload endpoint."""
+        files = [
+            ('files', ('mixed_train1.jpg', self.dummy_image, 'image/jpeg')),
+            ('files', ('mixed_train2.jpg', self.dummy_image, 'image/jpeg'))
+        ]
+        self.client.post("/upload/data", files=files)
+    
+    @task(2)
+    def trigger_retraining(self):
+        """Test model retraining endpoint."""
+        self.client.post("/retrain")
     
 
 
