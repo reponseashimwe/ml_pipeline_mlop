@@ -196,7 +196,7 @@ cd ml_pipeline_mlops
 
 # Install Python dependencies
 cd src
-pip install -r requirements.txt
+pip install -r requirements-ultra-minimal.txt
 
 # Run the API
 python main.py
@@ -328,7 +328,7 @@ locust -f locustfile.py --host=http://localhost:8000
 
 ### **Backend (Render)**
 
--   **Build Command**: `pip install -r requirements.txt`
+-   **Build Command**: `pip install -r requirements-ultra-minimal.txt`
 -   **Start Command**: `cd src && python main.py`
 
 -   **Memory Optimization**: Lazy loading and image resizing

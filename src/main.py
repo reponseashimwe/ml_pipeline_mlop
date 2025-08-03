@@ -28,9 +28,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
 
-# Import our modules
-from prediction import create_predictor
-from database import get_database
+# Lazy imports to save memory
+# from prediction import create_predictor
+# from database import get_database
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -55,10 +55,8 @@ app.add_middleware(
 # Mount static files for test images
 app.mount("/static", StaticFiles(directory="test-files"), name="static")
 
-# Initialize database globally
-db = get_database()
-
-# Lazy predictor initialization to save memory
+# Lazy initialization to save memory
+db = None
 predictor = None
 
 # Global variables for model status
@@ -90,13 +88,32 @@ def get_predictor():
     """Lazy load predictor to save memory"""
     global predictor
     if predictor is None:
-        logger.info("🔄 Loading predictor (lazy initialization)")
-        predictor = create_predictor("../models/malnutrition_model.h5", confidence_threshold=0.70)
-        model_status["loaded"] = True
-        model_status["is_loaded"] = True
-        model_status["last_updated"] = datetime.now().isoformat()
-        logger.info("✅ Predictor loaded successfully")
+        try:
+            # Import only when needed
+            from prediction import create_predictor
+            logger.info("🔄 Loading predictor (lazy initialization)")
+            predictor = create_predictor("../models/malnutrition_model.h5", confidence_threshold=0.70)
+            model_status["loaded"] = True
+            model_status["is_loaded"] = True
+            model_status["last_updated"] = datetime.now().isoformat()
+            logger.info("✅ Predictor loaded successfully")
+        except Exception as e:
+            logger.error(f"Failed to load predictor: {e}")
+            raise HTTPException(status_code=500, detail="Model loading failed")
     return predictor
+
+def get_database():
+    """Lazy load database to save memory"""
+    global db
+    if db is None:
+        try:
+            # Import only when needed
+            from database import get_database
+            db = get_database()
+        except Exception as e:
+            logger.error(f"Failed to load database: {e}")
+            db = None
+    return db
 
 # Pydantic models for request/response
 class PredictionResponse(BaseModel):
@@ -129,7 +146,7 @@ class RetrainingResponse(BaseModel):
 @app.on_event("startup")
 async def startup_event():
     """Initialize the application on startup."""
-    logger.info("Starting Child Malnutrition Detection API...")
+    logger.info("Starting Child Malnutrition Detection API (Memory Optimized)...")
     
     # Check if model exists (but don't load it yet to save memory)
     model_path = "../models/malnutrition_model.h5"
@@ -145,15 +162,20 @@ async def startup_event():
 async def root():
     """Root endpoint with API information."""
     return {
-        "message": "Child Malnutrition Detection API",
+        "message": "Child Malnutrition Detection API (Memory Optimized)",
         "version": "1.0.0",
         "status": "running",
         "model_loaded": predictor is not None,
         "model_available": os.path.exists("../models/malnutrition_model.h5"),
+        "memory_optimized": True,
         "endpoints": {
             "predict_single": "/predict/image",
             "status": "/status",
-            "docs": "/docs"
+            "docs": "/docs",
+            "upload_data": "/upload/data",
+            "retrain": "/retrain",
+            "metrics": "/metrics",
+            "visualization": "/api/visualization-data"
         }
     }
 
@@ -674,7 +696,8 @@ async def health_check():
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
         "model_loaded": predictor is not None,
-        "active_training_jobs": len([job for job in training_jobs.values() if job["status"] in ["starting", "training"]])
+        "active_training_jobs": len([job for job in training_jobs.values() if job["status"] in ["starting", "training"]]),
+        "memory_optimized": True
     }
 
 @app.get("/performance-report")
