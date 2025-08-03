@@ -24,6 +24,7 @@ import uvicorn
 
 # Import our modules
 from prediction import create_predictor
+from database import get_database
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -48,8 +49,9 @@ app.add_middleware(
 # Mount static files for test images
 app.mount("/static", StaticFiles(directory="test-files"), name="static")
 
-# Initialize predictor globally
-predictor = create_predictor("../models/malnutrition_model.h5", confidence_threshold=0.80)
+# Initialize predictor and database globally
+predictor = create_predictor("../models/malnutrition_model.h5", confidence_threshold=0.70)
+db = get_database()
 
 # Global variables for model status
 model_status = {
@@ -61,15 +63,17 @@ model_status = {
     "uptime_start": datetime.now()
 }
 
-# Training data storage
-training_data_dir = "../data/uploaded_training"
-pending_training_dir = "../data/pending_training"
-os.makedirs(training_data_dir, exist_ok=True)
-os.makedirs(f"{training_data_dir}/malnourished", exist_ok=True)
-os.makedirs(f"{training_data_dir}/overnourished", exist_ok=True)
-os.makedirs(pending_training_dir, exist_ok=True)
-os.makedirs(f"{pending_training_dir}/malnourished", exist_ok=True)
-os.makedirs(f"{pending_training_dir}/overnourished", exist_ok=True)
+# Training data storage - SIMPLIFIED STRUCTURE
+uploads_temp_dir = "../data/uploads_temp"
+main_train_dir = "../data/train"
+
+# Create required directories
+os.makedirs(uploads_temp_dir, exist_ok=True)
+os.makedirs(f"{uploads_temp_dir}/malnourished", exist_ok=True)
+os.makedirs(f"{uploads_temp_dir}/overnourished", exist_ok=True)
+os.makedirs(main_train_dir, exist_ok=True)
+os.makedirs(f"{main_train_dir}/malnourished", exist_ok=True)
+os.makedirs(f"{main_train_dir}/overnourished", exist_ok=True)
 
 # Global variables for training progress
 training_jobs = {}
@@ -112,7 +116,7 @@ async def startup_event():
     model_path = "../models/malnutrition_model.h5"
     if os.path.exists(model_path):
         try:
-            predictor = create_predictor(model_path, confidence_threshold=0.80)
+            predictor = create_predictor(model_path, confidence_threshold=0.70)
             model_status["loaded"] = True
             model_status["is_loaded"] = True
             model_status["model_path"] = model_path
@@ -302,7 +306,7 @@ async def upload_labeled_training_data(files: List[UploadFile] = File(...), labe
                     continue
                 
                 # Save file to appropriate class directory
-                class_dir = os.path.join(training_data_dir, label)
+                class_dir = os.path.join(uploads_temp_dir, label)
                 os.makedirs(class_dir, exist_ok=True)
                 
                 # Add timestamp to avoid filename conflicts
@@ -313,15 +317,27 @@ async def upload_labeled_training_data(files: List[UploadFile] = File(...), labe
                 with open(file_path, "wb") as buffer:
                     shutil.copyfileobj(file.file, buffer)
                 
+                file_size = os.path.getsize(file_path)
+                
+                # Save to database for retraining purposes
+                db_record_id = db.save_uploaded_data(
+                    filename=safe_filename,
+                    original_name=file.filename,
+                    file_path=file_path,
+                    class_label=label,
+                    file_size=file_size
+                )
+                
                 uploaded_files.append({
                     "filename": safe_filename,
                     "original_name": file.filename,
                     "label": label,
-                    "size": os.path.getsize(file_path),
-                    "path": file_path
+                    "size": file_size,
+                    "path": file_path,
+                    "db_id": db_record_id
                 })
                 
-                logger.info(f"📁 Saved labeled image: {safe_filename} -> {label}")
+                logger.info(f"📁 Saved labeled image: {safe_filename} -> {label} (DB ID: {db_record_id})")
                 
             except Exception as e:
                 failed_files.append({
@@ -405,15 +421,15 @@ def run_training_in_thread(job_id: str):
         training_jobs[job_id]["status"] = "training"
         logger.info(f"📊 Job {job_id} status updated to training")
         
+        # Start database training session
+        db.start_training_session(job_id, 20)  # 20 epochs default
+        
         # Import our clean retraining module
         from retrain import retrain_model, merge_uploaded_data
         
         # 1. Merge uploaded data with existing training data
-        uploaded_data_dir = "../data/uploaded_training"
-        main_train_dir = "../data/train"
-        
         logger.info("📁 Merging uploaded data with training data...")
-        merge_success = merge_uploaded_data(uploaded_data_dir, main_train_dir)
+        merge_success = merge_uploaded_data(uploads_temp_dir, main_train_dir)
         
         if not merge_success:
             training_jobs[job_id]["status"] = "failed"
@@ -428,6 +444,17 @@ def run_training_in_thread(job_id: str):
         def safe_progress_callback(epoch, metrics):
             try:
                 update_training_progress(job_id, epoch, metrics)
+                
+                # Save training metrics to database
+                db.save_training_metrics(
+                    session_id=job_id,
+                    epoch=epoch,
+                    accuracy=metrics.get('accuracy', 0.0),
+                    loss=metrics.get('loss', 0.0),
+                    val_accuracy=metrics.get('val_accuracy', 0.0),
+                    val_loss=metrics.get('val_loss', 0.0)
+                )
+                
                 logger.info(f"📊 Progress callback executed for epoch {epoch}")
             except Exception as e:
                 logger.error(f"❌ Progress callback error: {e}")
@@ -443,18 +470,38 @@ def run_training_in_thread(job_id: str):
             logger.info("✅ Retraining completed successfully!")
             logger.info(f"📊 Results: {result['metrics']}")
             
-            # 3. Clean up uploaded training data after successful retraining
+            # Complete database training session
+            metrics = result.get('metrics', {})
+            db.complete_training_session(
+                session_id=job_id,
+                final_accuracy=metrics.get('final_accuracy', 0.0),
+                final_loss=metrics.get('final_loss', 0.0),
+                model_path="../models/malnutrition_model.h5"
+            )
+            
+            # Mark uploaded data as used for training
             try:
-                logger.info("🗑️ Cleaning up uploaded training data...")
-                if os.path.exists(uploaded_data_dir):
-                    for class_dir in os.listdir(uploaded_data_dir):
-                        class_path = os.path.join(uploaded_data_dir, class_dir)
+                uploaded_data = db.get_uploaded_data_for_training()
+                if uploaded_data:
+                    record_ids = [data['id'] for data in uploaded_data]
+                    db.mark_data_as_used(record_ids)
+                    logger.info(f"📊 Marked {len(record_ids)} uploaded files as used for training")
+            except Exception as e:
+                logger.error(f"❌ Error updating database records: {e}")
+            
+            # 3. Clean up temporary uploads after successful retraining
+            try:
+                logger.info("🗑️ Cleaning up temporary upload folder...")
+                if os.path.exists(uploads_temp_dir):
+                    for class_dir in os.listdir(uploads_temp_dir):
+                        class_path = os.path.join(uploads_temp_dir, class_dir)
                         if os.path.isdir(class_path):
                             shutil.rmtree(class_path)
-                            logger.info(f"🗑️ Deleted uploaded {class_dir} images")
-                    logger.info("✅ Uploaded training data cleaned up successfully")
+                            os.makedirs(class_path, exist_ok=True)  # Recreate empty folder
+                            logger.info(f"🗑️ Cleared temp {class_dir} images")
+                    logger.info("✅ Temporary uploads cleaned up successfully")
             except Exception as e:
-                logger.error(f"⚠️ Failed to clean up uploaded data: {e}")
+                logger.error(f"⚠️ Failed to clean up temp uploads: {e}")
             
             # Update final status
             training_jobs[job_id]["status"] = "completed"
@@ -463,7 +510,7 @@ def run_training_in_thread(job_id: str):
             # 4. Reload the updated model
             global predictor
             try:
-                predictor = create_predictor("../models/malnutrition_model.h5", confidence_threshold=0.80)
+                predictor = create_predictor("../models/malnutrition_model.h5", confidence_threshold=0.70)
                 model_status["last_updated"] = datetime.now().isoformat()
                 model_status["is_loaded"] = True
                 logger.info("✅ Model reloaded successfully!")
@@ -571,33 +618,44 @@ async def get_status():
         uptime_minutes = (uptime_seconds % 3600) // 60
         uptime_str = f"{uptime_hours}:{uptime_minutes:02d}:{uptime_seconds % 60:02d}"
         
-        # Try to load actual performance metrics from saved history
+        # Get REAL performance metrics from database (not hardcoded!)
         performance_metrics = {
-            "accuracy": 0.89,  # Default fallback
-            "precision": 0.87,
-            "recall": 0.91,
-            "f1_score": 0.89
+            "accuracy": 0.0,  # Will be updated from database
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1_score": 0.0
         }
         
-        # Try to read actual metrics from training history
-        history_path = "../models/malnutrition_model_history.json"
-        if os.path.exists(history_path):
-            try:
-                import json
-                with open(history_path, 'r') as f:
-                    history_data = json.load(f)
-                if history_data and len(history_data) > 0:
-                    # Get final epoch metrics
-                    final_epoch = history_data[-1]
-                    performance_metrics = {
-                        "accuracy": final_epoch.get("val_accuracy", 0.89),
-                        "precision": final_epoch.get("val_precision", 0.87), 
-                        "recall": final_epoch.get("val_recall", 0.91),
-                        "f1_score": final_epoch.get("val_accuracy", 0.89)  # Approximation
-                    }
-                    logger.info(f"📊 Loaded performance metrics from training history")
-            except Exception as e:
-                logger.warning(f"Could not load performance metrics from history: {e}")
+        # Get latest model performance from database
+        try:
+            import sqlite3
+            db_path = "../data/malnutrition.db"
+            if os.path.exists(db_path):
+                with sqlite3.connect(db_path) as conn:
+                    conn.row_factory = sqlite3.Row
+                    cursor = conn.cursor()
+                    
+                    # Get the most recent model performance
+                    cursor.execute('''
+                        SELECT accuracy, precision_score, recall_score, f1_score
+                        FROM model_performance 
+                        ORDER BY created_at DESC 
+                        LIMIT 1
+                    ''')
+                    
+                    result = cursor.fetchone()
+                    if result:
+                        performance_metrics = {
+                            "accuracy": float(result['accuracy']),
+                            "precision": float(result['precision_score']),
+                            "recall": float(result['recall_score']),
+                            "f1_score": float(result['f1_score'])
+                        }
+                        logger.info(f"📊 Loaded REAL performance metrics from database: {performance_metrics}")
+                    else:
+                        logger.warning("No model performance records found in database")
+        except Exception as e:
+            logger.warning(f"Could not load performance metrics from database: {e}")
         
         return {
             "is_loaded": model_status["is_loaded"],
@@ -612,6 +670,25 @@ async def get_status():
     except Exception as e:
         logger.error(f"Error getting status: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to get status: {str(e)}")
+
+@app.get("/database/stats")
+async def get_database_stats():
+    """
+    Get database statistics showing uploaded data and training metrics.
+    
+    Returns:
+        Database statistics and counts
+    """
+    try:
+        stats = db.get_database_stats()
+        return {
+            "success": True,
+            "database_stats": stats,
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error getting database stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/health")
 async def health_check():
@@ -972,14 +1049,13 @@ async def get_uploaded_images():
     Get list of existing uploaded training images.
     """
     try:
-        uploaded_dir = "../data/uploaded_training"
         images = []
         
-        logger.info(f"🔍 Scanning uploaded directory: {uploaded_dir}")
+        logger.info(f"🔍 Scanning uploaded directory: {uploads_temp_dir}")
         
-        if os.path.exists(uploaded_dir):
-            for class_name in os.listdir(uploaded_dir):
-                class_path = os.path.join(uploaded_dir, class_name)
+        if os.path.exists(uploads_temp_dir):
+            for class_name in os.listdir(uploads_temp_dir):
+                class_path = os.path.join(uploads_temp_dir, class_name)
                 logger.info(f"📁 Checking class directory: {class_path}")
                 
                 if os.path.isdir(class_path):
@@ -1015,7 +1091,7 @@ async def get_uploaded_image(class_name: str, filename: str):
     Serve uploaded training images.
     """
     try:
-        image_path = f"../data/uploaded_training/{class_name}/{filename}"
+        image_path = f"../data/uploads_temp/{class_name}/{filename}"
         
         if os.path.exists(image_path):
             return FileResponse(
@@ -1036,7 +1112,7 @@ async def delete_uploaded_image(class_name: str, filename: str):
     Delete an uploaded training image.
     """
     try:
-        image_path = f"../data/uploaded_training/{class_name}/{filename}"
+        image_path = f"../data/uploads_temp/{class_name}/{filename}"
         
         if os.path.exists(image_path):
             os.remove(image_path)

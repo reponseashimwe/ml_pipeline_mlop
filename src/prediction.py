@@ -21,13 +21,13 @@ logger = logging.getLogger(__name__)
 class MalnutritionPredictor:
     """Predictor for malnutrition detection with 3-class output using confidence thresholds."""
     
-    def __init__(self, model_path: str, confidence_threshold: float = 0.80):
+    def __init__(self, model_path: str, confidence_threshold: float = 0.70):
         """
         Initialize the malnutrition predictor.
         
         Args:
             model_path: Path to the trained model file
-            confidence_threshold: Threshold for 3-class classification (default: 0.80)
+            confidence_threshold: Threshold for 3-class classification (default: 0.70)
         """
         self.model_path = model_path
         self.confidence_threshold = confidence_threshold
@@ -299,13 +299,13 @@ class MalnutritionPredictor:
             return False
 
 
-def create_predictor(model_path: str, confidence_threshold: float = 0.80) -> MalnutritionPredictor:
+def create_predictor(model_path: str, confidence_threshold: float = 0.70) -> MalnutritionPredictor:
     """
     Factory function to create a MalnutritionPredictor instance.
     
     Args:
         model_path: Path to the trained model file
-        confidence_threshold: Confidence threshold for classification (default: 0.80)
+        confidence_threshold: Confidence threshold for classification (default: 0.70)
         
     Returns:
         MalnutritionPredictor instance
@@ -318,7 +318,7 @@ if __name__ == "__main__":
     model_path = "../models/malnutrition_model.h5"
     
     if os.path.exists(model_path):
-        predictor = create_predictor(model_path, confidence_threshold=0.80)
+        predictor = create_predictor(model_path, confidence_threshold=0.70)
     
     # Example prediction
         test_image = "../data/test/malnourished/malnourished-338_jpg.rf.e4084a36394a8785ffb48a82c7873a81.jpg"
