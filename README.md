@@ -37,6 +37,7 @@
 -   **Frontend**: [https://ml-pipeline-mlop.vercel.app/](https://ml-pipeline-mlop.vercel.app/)
 -   **Backend API**: [https://ml-pipeline-mlop.onrender.com/](https://ml-pipeline-mlop.onrender.com/)
 -   **DOvumentation**: [https://ml-pipeline-mlop.onrender.com/docs](https://ml-pipeline-mlop.onrender.com/docs)
+-   **Locust Report**: [https://ml-pipeline-mlop.onrender.com/performance-report](https://ml-pipeline-mlop.onrender.com/performance-report)
 -   **Status**: ✅ **LIVE & OPERATIONAL**
 
 ### **⚠️ Important Notes**
