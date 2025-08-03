@@ -29,17 +29,17 @@ class MalnutritionAPIUser(HttpUser):
         img_byte_arr = img_byte_arr.getvalue()
         return img_byte_arr
     
-    @task(3)
+    @task(5)
     def health_check(self):
         """Test health check endpoint."""
         self.client.get("/health")
     
-    @task(2)
+    @task(4)
     def get_status(self):
         """Test model status endpoint."""
         self.client.get("/status")
     
-    @task(1)
+    @task(8)
     def predict_single_image(self):
         """Test single image prediction endpoint."""
         files = {'image': ('test_image.jpg', self.dummy_image, 'image/jpeg')}
@@ -47,12 +47,12 @@ class MalnutritionAPIUser(HttpUser):
     
 
     
-    @task(1)
+    @task(3)
     def get_metrics(self):
         """Test performance metrics endpoint."""
         self.client.get("/metrics")
     
-    @task(1)
+    @task(2)
     def upload_data(self):
         """Test data upload endpoint."""
         files = [
@@ -61,7 +61,7 @@ class MalnutritionAPIUser(HttpUser):
         ]
         self.client.post("/upload/data", files=files)
     
-    @task(1)
+    @task(2)
     def trigger_retraining(self):
         """Test model retraining endpoint."""
         self.client.post("/retrain")
@@ -84,13 +84,13 @@ class HighLoadUser(HttpUser):
         img_byte_arr = img_byte_arr.getvalue()
         return img_byte_arr
     
-    @task(5)
+    @task(10)
     def rapid_predictions(self):
         """Rapid fire predictions for stress testing."""
         files = {'image': ('stress_test.jpg', self.dummy_image, 'image/jpeg')}
         self.client.post("/predict/image", files=files)
     
-    @task(2)
+    @task(5)
     def health_check(self):
         """Frequent health checks."""
         self.client.get("/health")
@@ -113,7 +113,7 @@ class APIStressTest(HttpUser):
         img_byte_arr = img_byte_arr.getvalue()
         return img_byte_arr
     
-    @task(3)
+    @task(8)
     def mixed_requests(self):
         """Mix of different request types."""
         # Health check
