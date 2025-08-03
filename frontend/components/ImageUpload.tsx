@@ -25,24 +25,6 @@ const TEST_FILES = [
 		description: 'Test malnourished child',
 	},
 	{
-		name: 'malnourished-003.jpg',
-		url: 'malnourished-003.jpg',
-		class: 'malnourished',
-		description: 'Test malnourished child',
-	},
-	{
-		name: 'normal-001.jpg',
-		url: 'normal-001.jpg',
-		class: 'normal',
-		description: 'Test normal child',
-	},
-	{
-		name: 'normal-002.jpg',
-		url: 'normal-002.jpg',
-		class: 'normal',
-		description: 'Test normal child',
-	},
-	{
 		name: 'normal-003.jpg',
 		url: 'normal-003.jpg',
 		class: 'normal',
@@ -303,7 +285,7 @@ const ImageUpload: React.FC<ImageUploadProps> = ({ onPrediction, isTrainingData 
 						Click on any test image below to quickly test the prediction system:
 					</p>
 
-					<div className='grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2'>
+					<div className='grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2'>
 						{TEST_FILES.map((testFile, index) => (
 							<button
 								key={index}
