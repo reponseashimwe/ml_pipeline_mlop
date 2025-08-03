@@ -3,6 +3,12 @@ Main FastAPI application for child malnutrition detection ML pipeline.
 Provides endpoints for prediction, model management, and data upload.
 """
 
+# TensorFlow Memory Optimization - MUST BE FIRST
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Reduce TensorFlow logging
+os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'  # Prevent GPU memory allocation
+os.environ['TF_MEMORY_ALLOCATION'] = '0.8'  # Limit memory usage to 80%
+
 import os
 import shutil
 import tempfile
@@ -49,9 +55,11 @@ app.add_middleware(
 # Mount static files for test images
 app.mount("/static", StaticFiles(directory="test-files"), name="static")
 
-# Initialize predictor and database globally
-predictor = create_predictor("../models/malnutrition_model.h5", confidence_threshold=0.70)
+# Initialize database globally
 db = get_database()
+
+# Lazy predictor initialization to save memory
+predictor = None
 
 # Global variables for model status
 model_status = {
@@ -77,6 +85,18 @@ os.makedirs(f"{main_train_dir}/overnourished", exist_ok=True)
 
 # Global variables for training progress
 training_jobs = {}
+
+def get_predictor():
+    """Lazy load predictor to save memory"""
+    global predictor
+    if predictor is None:
+        logger.info("🔄 Loading predictor (lazy initialization)")
+        predictor = create_predictor("../models/malnutrition_model.h5", confidence_threshold=0.70)
+        model_status["loaded"] = True
+        model_status["is_loaded"] = True
+        model_status["last_updated"] = datetime.now().isoformat()
+        logger.info("✅ Predictor loaded successfully")
+    return predictor
 
 # Pydantic models for request/response
 class PredictionResponse(BaseModel):
@@ -109,22 +129,15 @@ class RetrainingResponse(BaseModel):
 @app.on_event("startup")
 async def startup_event():
     """Initialize the application on startup."""
-    global predictor
     logger.info("Starting Child Malnutrition Detection API...")
     
-    # Try to load existing model
+    # Check if model exists (but don't load it yet to save memory)
     model_path = "../models/malnutrition_model.h5"
     if os.path.exists(model_path):
-        try:
-            predictor = create_predictor(model_path, confidence_threshold=0.70)
-            model_status["loaded"] = True
-            model_status["is_loaded"] = True
-            model_status["model_path"] = model_path
-            model_status["last_updated"] = datetime.now().isoformat()
-            logger.info("Model loaded successfully on startup")
-        except Exception as e:
-            logger.error(f"Failed to load model: {e}")
-            predictor = None
+        model_status["loaded"] = False  # Will be loaded on first prediction
+        model_status["is_loaded"] = False
+        model_status["model_path"] = model_path
+        logger.info("Model file found - will load on first prediction (lazy loading)")
     else:
         logger.info("No existing model found. Please train the model first using the notebook.")
 
@@ -136,6 +149,7 @@ async def root():
         "version": "1.0.0",
         "status": "running",
         "model_loaded": predictor is not None,
+        "model_available": os.path.exists("../models/malnutrition_model.h5"),
         "endpoints": {
             "predict_single": "/predict/image",
             "status": "/status",
@@ -148,9 +162,6 @@ async def predict_image(image: UploadFile = File(...)):
     """
     Predict malnutrition from uploaded image.
     """
-    if not predictor:
-        raise HTTPException(status_code=500, detail="Model not loaded")
-    
     try:
         # Validate file type
         if not image.content_type.startswith('image/'):
@@ -159,8 +170,11 @@ async def predict_image(image: UploadFile = File(...)):
         # Read image data
         image_data = await image.read()
         
+        # Lazy load predictor
+        current_predictor = get_predictor()
+        
         # Make prediction
-        result = predictor.predict_single(image_data)
+        result = current_predictor.predict_single(image_data)
         
         return result
         

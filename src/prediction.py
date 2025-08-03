@@ -209,6 +209,15 @@ class MalnutritionPredictor:
             # Convert bytes to PIL Image
             image = Image.open(io.BytesIO(image_bytes))
             
+            # Check image size and resize if too large (memory optimization)
+            max_size = 1024  # Maximum dimension before resizing
+            if max(image.size) > max_size:
+                # Calculate new size maintaining aspect ratio
+                ratio = max_size / max(image.size)
+                new_size = tuple(int(dim * ratio) for dim in image.size)
+                image = image.resize(new_size, Image.Resampling.LANCZOS)
+                logger.info(f"Resized large image from {image.size} to {new_size} for memory optimization")
+            
             # Convert to RGB if necessary
             if image.mode != 'RGB':
                 image = image.convert('RGB')
