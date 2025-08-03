@@ -207,12 +207,16 @@ data/
 
 ```bash
 # Clone repository
-git clone <repository-url>
+git clone https://github.com/reponseashimwe/ml_pipeline_mlop
 cd ml_pipeline_mlops
+
+# Venv
+python -m venv venv
+source venv/bin/activate
 
 # Install Python dependencies
 cd src
-pip install -r requirements-ultra-minimal.txt
+pip install -r requirements-.txt
 
 # Run the API
 python main.py
@@ -225,10 +229,10 @@ python main.py
 cd frontend
 
 # Install dependencies
-npm install
+pnpm install
 
 # Run development server
-npm run dev
+pnpm dev
 ```
 
 ### **Memory Optimization (512MB Render Limit)**
